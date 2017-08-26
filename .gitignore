@@ -1,0 +1,9 @@
+*.sublime-workspace
+vc140.pdb
+build/*.*
+!build/*.h
+!build/*.rc
+!build/build.bat
+.vs/
+data/Raw/
+*.VC.*

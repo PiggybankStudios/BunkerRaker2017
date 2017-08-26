@@ -1,0 +1,9 @@
+# TODO List for Bunker Raker 2017
+	[ ] Get application and platform layer copied from Const Port working on windows
+	[ ] Get a triangle rendered
+	[ ] Get STB TrueType rendering a string for debug purposes
+	[ ] Create a grid of pretend pixels
+	[ ] Find a point on the edge of the shape
+	[ ] Approximate tangent at that point
+	[ ] Travel along tangent, drop to intersecting point on the shape
+	[ ] 
