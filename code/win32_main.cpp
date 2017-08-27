@@ -33,6 +33,12 @@ Description:
 #define APPLICATION_DLL_NAME      "BunkerRaker2017.dll"
 #define APPLICATION_DLL_TEMP_NAME "BunkerRaker2017_TEMP.dll"
 #define OPEN_CONSOLE_WINDOW       DEBUG
+#define WINDOW_WIDTH              500
+#define WINDOW_HEIGHT             500
+#define WINDOW_MIN_WIDTH          100
+#define WINDOW_MIN_HEIGHT         100
+#define ENFORCE_ASPECT_RATIO      true
+#define WINDOW_ASPECT_RATIO       1, 1
 
 #define HandleError(outputString) do {                                               \
 		Win32_WriteLine(outputString);                                               \
@@ -125,7 +131,7 @@ int WINAPI WinMain(HINSTANCE hInstance,
 	glfwWindowHint(GLFW_SAMPLES, 4);
 	
 	Win32_Write("Creating GLFW window...");
-	window = glfwCreateWindow(800, 600, WINDOW_TITLE, NULL, NULL);
+	window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE, NULL, NULL);
 	
 	if (window == nullptr)
 	{
@@ -208,9 +214,11 @@ int WINAPI WinMain(HINSTANCE hInstance,
 	Win32_PrintLine("Monitor Refresh Rate: %dHz", glfwModePntr->refreshRate);
 	
 	glfwSetWindowSizeLimits(window, 
-		400, 300,
+		WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 		GLFW_DONT_CARE, GLFW_DONT_CARE);
-	glfwSetWindowAspectRatio(window, 4, 3);
+	#if ENFORCE_ASPECT_RATIO
+	glfwSetWindowAspectRatio(window, WINDOW_ASPECT_RATIO);
+	#endif
 	glfwGetFramebufferSize(window, &screenWidth, &screenHeight);
 	glViewport(0, 0, screenWidth, screenHeight);
 	Win32_PrintLine("Screen Size: %dx%d", screenWidth, screenHeight);

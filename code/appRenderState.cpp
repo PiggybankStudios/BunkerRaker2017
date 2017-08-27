@@ -377,3 +377,21 @@ void RenderState_t::PrintString(v2 position, Color_t color, r32 scale, const cha
 	this->DrawString(printBuffer, length, position, color, scale);
 }
 
+void RenderState_t::DrawLine(v2 startPos, v2 endPos, Color_t color, r32 width)
+{
+	this->BindTexture(&this->dotTexture);
+	this->SetSourceRectangle(NewRectangle(0, 0, 1, 1));
+	this->SetColor(color);
+	
+	r32 lineLength = Vec2Length(endPos-startPos);
+	r32 lineRotation = (r32)atan2(endPos.y - startPos.y, endPos.x - startPos.x);
+	
+	m4 worldMatrix = Matrix4Translate(NewVec3(0, -0.0f, 0.0f));
+	worldMatrix = Matrix4Scale(NewVec3(lineLength, width, 1.0f)) * worldMatrix;
+	worldMatrix = Matrix4RotateZ(lineRotation) * worldMatrix;
+	worldMatrix = Matrix4Translate(NewVec3(startPos.x, startPos.y, 0.0f)) * worldMatrix;
+	this->SetWorldMatrix(worldMatrix);
+	this->BindBuffer(&this->squareBuffer);
+	glDrawArrays(GL_TRIANGLES, 0, this->squareBuffer.numVertices);
+}
+

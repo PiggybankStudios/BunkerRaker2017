@@ -61,6 +61,7 @@ struct RenderState_t
 	void DrawString(const char* string, u32 numCharacters, v2 position, Color_t color, r32 scale = 1.0f);
 	void DrawString(const char* nullTermString, v2 position, Color_t color, r32 scale = 1.0f);
 	void PrintString(v2 position, Color_t color, r32 scale, const char* formatString, ...);
+	void DrawLine(v2 startPos, v2 endPos, Color_t color, r32 width = 1.0f);
 };
 
 #endif // _APP_RENDER_STATE_H

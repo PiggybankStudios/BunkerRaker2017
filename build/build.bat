@@ -8,7 +8,7 @@ mkdir build > NUL 2> NUL
 rem echo Running from %cd%
 rem echo Time is %TimeString%
 
-set CompilePlatform=1
+set CompilePlatform=0
 set CompileApplication=1
 set DebugBuild=1
 set ProjectName=BunkerRaker2017

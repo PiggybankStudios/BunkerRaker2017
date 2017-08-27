@@ -15,6 +15,10 @@ struct AppData_t
 	Font_t testFont;
 	Shader_t simpleShader;
 	RenderState_t renderState;
+	
+	v2i colorArraySize;
+	u32* colorArray;
+	Texture_t colorArrayTexture;
 };
 
 #endif // _APP_DATA_H
