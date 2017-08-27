@@ -9,10 +9,20 @@ Description:
 
 #define RELOAD_APPLICATION    false
 #define TEST_FONT_SIZE        16
+
+#define COLOAR_ARRAY_WIDTH    600
+#define COLOAR_ARRAY_HEIGHT   600
+
+#define FIXED_META_BALL_POS_X 300
+#define FIXED_META_BALL_POS_Y 300
+#define FIXED_META_BALL_SIZE  10
+#define MOUSE_META_BALL_SIZE  15
+
 #define TANGENT_CHECK_RADIUS  10
 #define STEP_SIZE             10
 #define MAX_DROP              5
 #define MAX_DIVISION_BACKSTEP 5
+#define MAX_VERTICES          200
 
 #include <stdarg.h>
 #include "platformInterface.h"
@@ -68,35 +78,55 @@ AppGetVersion_DEFINITION(App_GetVersion)
 
 const Color_t MyColors[] = { {Color_White}, {Color_Red}, {Color_Turquoise}, {Color_Purple}, {Color_Blue} };
 
+void SetColorInArray(u32* colorArray, v2i arraySize, i32 xPos, i32 yPos, Color_t color)
+{
+	u32* colorPntr = &colorArray[yPos*arraySize.x + xPos];
+	u8* redPntr    = &((u8*)colorPntr)[0];
+	u8* greenPntr  = &((u8*)colorPntr)[1];
+	u8* bluePntr   = &((u8*)colorPntr)[2];
+	u8* alphaPntr  = &((u8*)colorPntr)[3];
+	
+	*redPntr   = color.r;
+	*greenPntr = color.g;
+	*bluePntr  = color.b;
+	*alphaPntr = color.a;
+}
+
+Color_t GetColorInArrayAt(u32* colorArray, v2i arraySize, i32 xPos, i32 yPos)
+{
+	if (xPos < 0) return {Color_White};
+	if (yPos < 0) return {Color_White};
+	if (xPos >= arraySize.x) return {Color_White};
+	if (yPos >= arraySize.y) return {Color_White};
+	
+	u8* colorPntr = (u8*)(&colorArray[yPos*arraySize.x + xPos]);
+	
+	return NewColor(
+		colorPntr[0],
+		colorPntr[1],
+		colorPntr[2],
+		colorPntr[3]
+	);
+}
+
 void FillColorArray(AppData_t* appData, v2i mousePos)
 {
 	#define NUM_BLOBS 3
 	v2 blobCenter[NUM_BLOBS];
-	blobCenter[0] = NewVec2(20, 20);
-	blobCenter[1] = NewVec2(50, 20);
+	blobCenter[0] = NewVec2((r32)appData->metaBallPos.x, (r32)appData->metaBallPos.y);
+	blobCenter[1] = NewVec2(FIXED_META_BALL_POS_X, FIXED_META_BALL_POS_Y);
 	blobCenter[2] = NewVec2((r32)mousePos.x, (r32)mousePos.y);
 	r32 blobRadius[NUM_BLOBS];
-	blobRadius[0] = 5;
-	blobRadius[1] = 5;
-	blobRadius[2] = 15;
+	blobRadius[0] = appData->metaBallSize;
+	blobRadius[1] = FIXED_META_BALL_SIZE;
+	blobRadius[2] = MOUSE_META_BALL_SIZE;
 	
 	v2 center = NewVec2(appData->colorArraySize.x/2.0f, appData->colorArraySize.y/2.0f);
-	for (i32 yPos = 0; yPos < appData->colorArraySize.x; yPos++)
+	for (i32 yPos = 0; yPos < appData->colorArraySize.y; yPos++)
 	{
 		for (i32 xPos = 0; xPos < appData->colorArraySize.x; xPos++)
 		{
-			u32* colorPntr = &appData->colorArray[yPos*appData->colorArraySize.x + xPos];
-			u8* redPntr    = &((u8*)colorPntr)[0];
-			u8* greenPntr  = &((u8*)colorPntr)[1];
-			u8* bluePntr   = &((u8*)colorPntr)[2];
-			u8* alphaPntr  = &((u8*)colorPntr)[3];
-			
 			Color_t pixelColor = { Color_Black };
-			
-			// *redPntr   = 0; //(u8)((r32)xPos / (r32)appData->colorArraySize.x * 255);
-			// *greenPntr = 0; //(u8)((r32)yPos / (r32)appData->colorArraySize.y * 255);
-			// *bluePntr  = 0;
-			// *alphaPntr = 255;
 			
 			r32 value = 0;
 			for (i32 bIndex = 0; bIndex < NUM_BLOBS; bIndex++)
@@ -111,10 +141,7 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 				pixelColor = { Color_SandyBrown };
 			}
 			
-			*redPntr = pixelColor.r;
-			*greenPntr = pixelColor.g;
-			*bluePntr = pixelColor.b;
-			*alphaPntr = pixelColor.a;
+			SetColorInArray(appData->colorArray, appData->colorArraySize, xPos, yPos, pixelColor);
 			
 			// if (xPos%2 == 0) *bluePntr = 0;
 			// if (yPos%2 == 0) *redPntr = 0;
@@ -139,29 +166,13 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 			// }
 		}
 	}
-	appData->colorArrayTexture = CreateTexture((u8*)appData->colorArray, appData->colorArraySize.x, appData->colorArraySize.y, true, false);
+	appData->colorArrayTexture = CreateTexture((u8*)appData->colorArray, appData->colorArraySize.x, appData->colorArraySize.y, false, false);
 }
+
 
 void HighlightPixel(RenderState_t* rs, r32 pixelSize, v2i pixelPos, Color_t color)
 {
 	rs->DrawButton(NewRectangle(pixelPos.x * pixelSize, pixelPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, color);
-}
-
-Color_t GetColorInArrayAt(AppData_t* appData, i32 xPos, i32 yPos)
-{
-	if (xPos < 0) return {Color_White};
-	if (yPos < 0) return {Color_White};
-	if (xPos >= appData->colorArraySize.x) return {Color_White};
-	if (yPos >= appData->colorArraySize.y) return {Color_White};
-	
-	u8* colorPntr = (u8*)(&appData->colorArray[yPos*appData->colorArraySize.x + xPos]);
-	
-	return NewColor(
-		colorPntr[0],
-		colorPntr[1],
-		colorPntr[2],
-		colorPntr[3]
-	);
 }
 
 bool IsPixelFilled(Color_t color)
@@ -185,15 +196,15 @@ bool IsPixelEdge(AppData_t* appData, i32 xPos, i32 yPos)
 	bool result = false;
 	
 	Color_t pixels[3][3];
-	// pixels[0][0] = GetColorInArrayAt(appData, xPos-1, yPos-1);
-	pixels[1][0] = GetColorInArrayAt(appData, xPos,   yPos-1);
-	// pixels[2][0] = GetColorInArrayAt(appData, xPos+1, yPos-1);
-	pixels[0][1] = GetColorInArrayAt(appData, xPos-1, yPos);
-	pixels[1][1] = GetColorInArrayAt(appData, xPos,   yPos);
-	pixels[2][1] = GetColorInArrayAt(appData, xPos+1, yPos);
-	// pixels[0][2] = GetColorInArrayAt(appData, xPos-1, yPos+1);
-	pixels[1][2] = GetColorInArrayAt(appData, xPos,   yPos+1);
-	// pixels[2][2] = GetColorInArrayAt(appData, xPos+1, yPos+1);
+	// pixels[0][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos-1);
+	pixels[1][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos-1);
+	// pixels[2][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos-1);
+	pixels[0][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos);
+	pixels[1][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos);
+	pixels[2][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos);
+	// pixels[0][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos+1);
+	pixels[1][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos+1);
+	// pixels[2][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos+1);
 	
 	if (IsPixelFilled(pixels[1][1]))
 	{
@@ -348,15 +359,15 @@ v2 FindTangentVector(AppData_t* appData, v2i position, i32 averageRadius, r32 pi
 			if (Vec2Length(pixelCenter - startPixCenter) <= averageRadius*pixelSize)
 			{
 				Color_t pixels[3][3];
-				pixels[0][0] = GetColorInArrayAt(appData, xPos-1, yPos-1);
-				pixels[1][0] = GetColorInArrayAt(appData, xPos,   yPos-1);
-				pixels[2][0] = GetColorInArrayAt(appData, xPos+1, yPos-1);
-				pixels[0][1] = GetColorInArrayAt(appData, xPos-1, yPos);
-				pixels[1][1] = GetColorInArrayAt(appData, xPos,   yPos);
-				pixels[2][1] = GetColorInArrayAt(appData, xPos+1, yPos);
-				pixels[0][2] = GetColorInArrayAt(appData, xPos-1, yPos+1);
-				pixels[1][2] = GetColorInArrayAt(appData, xPos,   yPos+1);
-				pixels[2][2] = GetColorInArrayAt(appData, xPos+1, yPos+1);
+				pixels[0][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos-1);
+				pixels[1][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos-1);
+				pixels[2][0] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos-1);
+				pixels[0][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos);
+				pixels[1][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos);
+				pixels[2][1] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos);
+				pixels[0][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos-1, yPos+1);
+				pixels[1][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos,   yPos+1);
+				pixels[2][2] = GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos+1, yPos+1);
 				Color_t* curPixel = &pixels[1][1];
 				
 				v2 centers[3][3];
@@ -537,6 +548,190 @@ v2 FindTangentVector(AppData_t* appData, v2i position, i32 averageRadius, r32 pi
 	return result;
 }
 
+u32 FindOutlineVertices(AppData_t* appData, v2i startPos, i32 maxVertices, r32 pixelSize, v2* verticesOut, RenderState_t* rs = nullptr)
+{
+	u32 result = 0;
+	
+	v2 startPosCenter = PixelCenter(pixelSize, startPos.x, startPos.y);
+	v2 startPosTangent = Vec2_Zero;
+	if (rs != nullptr) { HighlightPixel(rs, pixelSize, startPos, {Color_Turquoise}); }
+	
+	v2i curPos = startPos;
+	for (i32 cIndex = 0; cIndex < maxVertices; cIndex++)
+	{
+		v2 curCenter = PixelCenter(pixelSize, curPos.x, curPos.y);
+		v2 tangent = FindTangentVector(appData, curPos, TANGENT_CHECK_RADIUS, pixelSize);
+		if (cIndex == 0) startPosTangent = tangent;
+		
+		r32 stepSize = STEP_SIZE;
+		i32 divisionCount = 0;
+		v2 armEnd; v2i armEndPixPos; r32 dropDist; v2 perpDir; v2i newPos = Vec2i_Zero;
+		do
+		{
+			armEnd = curCenter + tangent * stepSize * pixelSize;
+			if (appData->drawDebug && rs != nullptr) { rs->DrawLine(curCenter, armEnd, MyColors[divisionCount], 2); }
+			
+			armEndPixPos = NewVec2i((i32)(armEnd.x / pixelSize), (i32)(armEnd.y / pixelSize));
+			perpDir = NewVec2(tangent.y, -tangent.x);
+			if (!IsPixelFilled(GetColorInArrayAt(appData->colorArray, appData->colorArraySize, armEndPixPos.x, armEndPixPos.y)))
+			{
+				perpDir = NewVec2(-tangent.y, tangent.x);
+			}
+			
+			if (Raycast(appData, armEnd, perpDir, pixelSize, &newPos))
+			{
+				dropDist = Vec2Length(armEnd - PixelCenter(pixelSize, newPos.x, newPos.y));
+				if (dropDist <= MAX_DROP*pixelSize || divisionCount >= MAX_DIVISION_BACKSTEP-1)
+				{
+					break;
+				}
+			}
+			
+			stepSize = stepSize / 2;
+			
+			divisionCount++;
+			if (divisionCount >= MAX_DIVISION_BACKSTEP)
+			{
+				break;
+			}
+			
+		} while (true);
+		
+		if (appData->drawDebug && rs != nullptr)
+		{
+			// v2i dummyPixelPos;
+			// Raycast(appData, armEnd, perpDir, pixelSize, &dummyPixelPos, rs);
+			rs->DrawLine(armEnd, PixelCenter(pixelSize, newPos.x, newPos.y), {Color_Green});
+		}
+		
+		bool foundStart = false;
+		r32 distToStart = Vec2Length(PixelCenter(pixelSize, newPos.x, newPos.y) - startPosCenter);
+		if (cIndex != 0 &&
+			distToStart < STEP_SIZE*pixelSize &&
+			Vec2Dot(tangent, startPosTangent) > 0)
+		{
+			foundStart = true;
+			newPos = startPos;
+		}
+		
+		v2 newVertex = PixelCenter(pixelSize, newPos.x, newPos.y);
+		if (verticesOut != nullptr)
+		{
+			verticesOut[result] = newVertex;
+		}
+		result++;
+		
+		if (rs != nullptr)
+		{
+			// rs->DrawLine(curCenter, armEnd, {Color_Red}, 2);
+			rs->DrawLine(curCenter, newVertex, {Color_Turquoise}, 2);
+			if (appData->drawDebug) { HighlightPixel(rs, pixelSize, newPos, {Color_Purple}); }
+		}
+		curPos = newPos;
+		
+		if (foundStart)
+		{
+			break;
+		}
+	}
+	
+	return result;
+}
+
+v2 ClosestPointOnLine(v2 point, v2 l1, v2 l2)
+{
+	r32 lineLength = Vec2Length(l2 - l1);
+	v2 lineVector = (l2 - l1) / lineLength;
+	
+	r32 dot = Vec2Dot(point - l1, lineVector);
+	if (dot <= 0)
+	{
+		return l1;
+	}
+	else if (dot >= lineLength)
+	{
+		return l2;
+	}
+	else
+	{
+		return l1 + (dot * lineVector);
+	}
+}
+
+v2 FindClosestSide(AppData_t* appData, v2 position, r32* distanceOut, i32* sideIndexOut)
+{
+	v2 result = Vec2_Zero;
+	
+	r32 minDistance = 0;
+	for (i32 vIndex = 0; vIndex < (i32)appData->numVertices; vIndex++)
+	{
+		v2 currentVertex = appData->vertices[vIndex];
+		v2 nextVertex    = appData->vertices[(vIndex+1) % appData->numVertices];
+		v2 closest = ClosestPointOnLine(position, currentVertex, nextVertex);
+		r32 closestDist = Vec2Length(closest - position);
+		
+		if (vIndex == 0 || closestDist < minDistance)
+		{
+			minDistance = closestDist;
+			result = closest;
+			*sideIndexOut = vIndex;
+			*distanceOut = minDistance;
+		}
+	}
+	
+	return result;
+}
+
+void GenerateBevelOverlay(AppData_t* appData, r32 pixelSize, r32 bevelSize, r32 bevelAmount, bool additive = false)
+{
+	v2 lightDir = Vec2Normalize(NewVec2(-1, 3));
+	
+	for (i32 yPos = 0; yPos < appData->colorArraySize.y; yPos++)
+	{
+		for (i32 xPos = 0; xPos < appData->colorArraySize.x; xPos++)
+		{
+			if (additive == false)
+			{
+				SetColorInArray(appData->bevelOverlayColors, appData->colorArraySize, xPos, yPos, {Color_TransparentBlack});
+			}
+			
+			if (appData->vertices != nullptr &&
+				IsPixelFilled(GetColorInArrayAt(appData->colorArray, appData->colorArraySize, xPos, yPos)))
+			{
+				v2 pixelPos = PixelCenter(pixelSize, xPos, yPos);
+				r32 sideDistance;
+				i32 sideIndex;
+				v2 sidePos = FindClosestSide(appData, pixelPos, &sideDistance, &sideIndex);
+				v2 sideV1 = appData->vertices[sideIndex];
+				v2 sideV2 = appData->vertices[(sideIndex+1) % appData->numVertices];
+				
+				if (sideDistance < bevelSize)
+				{
+					r32 dot = Vec2Dot(Vec2Normalize(sidePos - pixelPos), lightDir);
+					
+					r32 colorShift = Clamp32(dot, -1.0f, 1.0f) * bevelAmount;
+					
+					Color_t pixelColor = {Color_TransparentBlack};
+					pixelColor.r = (colorShift >= 0 ? 255 : 0);
+					pixelColor.g = (colorShift >= 0 ? 255 : 0);
+					pixelColor.b = (colorShift >= 0 ? 255 : 0);
+					pixelColor.a = (u8)Abs32(colorShift * 255);
+					if (additive)
+					{
+						Color_t oldPixelColor = GetColorInArrayAt(appData->bevelOverlayColors, appData->colorArraySize, xPos, yPos);
+						pixelColor.r = min(255, oldPixelColor.r + pixelColor.r);
+						pixelColor.g = min(255, oldPixelColor.g + pixelColor.g);
+						pixelColor.b = min(255, oldPixelColor.b + pixelColor.b);
+						pixelColor.a = min(255, oldPixelColor.a + pixelColor.a);
+					}
+					SetColorInArray(appData->bevelOverlayColors, appData->colorArraySize, xPos, yPos, pixelColor);
+				}
+			}
+		}
+	}
+	appData->bevelOverlayTexture = CreateTexture((u8*)appData->bevelOverlayColors, appData->colorArraySize.x, appData->colorArraySize.y, false, false);
+}
+
 // +------------------------------------------------------------------+
 // |                          AppInitialize                           |
 // +------------------------------------------------------------------+
@@ -554,9 +749,10 @@ AppInitialize_DEFINITION(App_Initialize)
 	u32 arenaSize = AppMemory->permanantSize - sizeof(AppData_t);
 	InitializeMemoryArenaHeap(&appData->mainHeap, arenaBase, arenaSize);
 	
-	InitializeRenderState(PlatformInfo, &appData->renderState);
-	
 	v2i screenSize = PlatformInfo->screenSize;
+	r32 pixelSize = screenSize.x / (r32)appData->colorArrayTexture.width;
+	
+	InitializeRenderState(PlatformInfo, &appData->renderState);
 	
 	appData->simpleShader = LoadShader(
 		"Resources/Shaders/simple-vertex.glsl",
@@ -564,10 +760,16 @@ AppInitialize_DEFINITION(App_Initialize)
 	
 	appData->testTexture = LoadTexture("Resources/Sprites/close.png");
 	appData->testFont = LoadFont("Resources/Fonts/consola.ttf", TEST_FONT_SIZE, 1024, 1024, ' ', 96);
+	appData->sandTexture = LoadTexture("Resources/Textures/sand2.jpeg");
 	
-	appData->colorArraySize = NewVec2i(100, 100);
+	appData->colorArraySize = NewVec2i(COLOAR_ARRAY_WIDTH, COLOAR_ARRAY_HEIGHT);
 	appData->colorArray = PushArray(&appData->mainHeap, u32, appData->colorArraySize.x*appData->colorArraySize.y);
-	FillColorArray(appData, NewVec2i(50, 50));
+	appData->metaBallPos = NewVec2i(20, 20);
+	appData->metaBallSize = 10;
+	FillColorArray(appData, NewVec2i(FIXED_META_BALL_POS_X, FIXED_META_BALL_POS_Y));
+	
+	appData->bevelOverlayColors = PushArray(&appData->mainHeap, u32, appData->colorArraySize.x*appData->colorArraySize.y);
+	GenerateBevelOverlay(appData, pixelSize, 10, 0.1f);
 	
 	DEBUG_WriteLine("Initialization Done!");
 }
@@ -581,10 +783,12 @@ AppReloaded_DEFINITION(App_Reloaded)
 	Gl_AppMemory = AppMemory;
 	AppData_t* appData = (AppData_t*)AppMemory->permanantPntr;
 	GL_AppData = appData;
+	v2i screenSize = PlatformInfo->screenSize;
+	r32 pixelSize = screenSize.x / (r32)appData->colorArrayTexture.width;
 	
-	DEBUG_WriteLine("Re-creating color array");
-	DestroyTexture(&appData->colorArrayTexture);
-	FillColorArray(appData, NewVec2i(50, 50));
+	// DEBUG_WriteLine("Re-creating color array");
+	// DestroyTexture(&appData->colorArrayTexture);
+	// FillColorArray(appData, NewVec2i(FIXED_META_BALL_POS_X, FIXED_META_BALL_POS_Y));
 }
 
 // +------------------------------------------------------------------+
@@ -606,14 +810,14 @@ AppUpdate_DEFINITION(App_Update)
 	// +================================+
 	// |        Recreate Texture        |
 	// +================================+
-	if (ButtonDown(Button_Control) && ButtonDown(Button_R))
+	if (ButtonDown(Button_R))
 	{
 		DEBUG_WriteLine("Re-creating color array");
 		DestroyTexture(&appData->colorArrayTexture);
 		FillColorArray(appData, mPixPos);
 	}
 	
-	if (ButtonPressed(MouseButton_Left))
+	if (ButtonPressed(MouseButton_Right))
 	{
 		appData->testStartPos = mousePos;
 	}
@@ -621,6 +825,60 @@ AppUpdate_DEFINITION(App_Update)
 	if (ButtonPressed(Button_D))
 	{
 		appData->drawDebug = !appData->drawDebug;
+	}
+	
+	if (ButtonDown(Button_Left) ||
+		ButtonDown(Button_Right) ||
+		ButtonDown(Button_Up) ||
+		ButtonDown(Button_Down))
+	{
+		if (ButtonDown(Button_Left))  { appData->metaBallPos.x--; }
+		if (ButtonDown(Button_Right)) { appData->metaBallPos.x++; }
+		if (ButtonDown(Button_Up))    { appData->metaBallPos.y--; }
+		if (ButtonDown(Button_Down))  { appData->metaBallPos.y++; }
+		
+		// DEBUG_WriteLine("Re-creating color array");
+		// DestroyTexture(&appData->colorArrayTexture);
+		// FillColorArray(appData, mPixPos);
+	}
+	
+	if (AppInput->scrollDelta.y != 0)
+	{
+		appData->metaBallSize *= 1.0f + (0.1f * AppInput->scrollDelta.y);
+		
+		// DEBUG_WriteLine("Re-creating color array");
+		// DestroyTexture(&appData->colorArrayTexture);
+		// FillColorArray(appData, mPixPos);
+	}
+	
+	if (ButtonPressed(Button_B))
+	{
+		DEBUG_WriteLine("Beveling the bunker");
+		GenerateBevelOverlay(appData, pixelSize, 20 * pixelSize, 0.05f, false);
+		GenerateBevelOverlay(appData, pixelSize, 10 * pixelSize, 0.15f, true);
+	}
+	
+	// +================================+
+	// |          Find Outline          |
+	// +================================+
+	if (ButtonDown(Button_Space) && IsPixelFilled(GetColorInArrayAt(appData->colorArray, appData->colorArraySize, appData->testStartPixel.x, appData->testStartPixel.y)))
+	{
+		DEBUG_WriteLine("Finding bunker outline...");
+		
+		if (appData->vertices != nullptr)
+		{
+			ArenaPop(&appData->mainHeap, appData->vertices);
+			appData->vertices = nullptr;
+			appData->numVertices = 0;
+		}
+		
+		appData->numVertices = FindOutlineVertices(appData, appData->testStartPixel, MAX_VERTICES, pixelSize, nullptr);
+		DEBUG_PrintLine("Found %u vertices", appData->numVertices);
+		
+		appData->vertices = PushArray(&appData->mainHeap, v2, appData->numVertices);
+		FindOutlineVertices(appData, appData->testStartPixel, MAX_VERTICES, pixelSize, appData->vertices);
+		
+		DEBUG_WriteLine("Done!");
 	}
 	
 	// +==================================+
@@ -651,13 +909,35 @@ AppUpdate_DEFINITION(App_Update)
 	// +==================================+
 	rs->BindTexture(&appData->colorArrayTexture);
 	rs->DrawTexturedRec(NewRectangle(0, 0, (r32)screenSize.x, (r32)screenSize.y), {Color_White});
+	rs->BindTexture(&appData->bevelOverlayTexture);
+	rs->DrawTexturedRec(NewRectangle(0, 0, (r32)screenSize.x, (r32)screenSize.y), {Color_White});
+	
+	// +==================================+
+	// |      Draw Meta Balls Debug       |
+	// +==================================+
+	if (appData->drawDebug)
+	{
+		v2 blobCenter[NUM_BLOBS];
+		blobCenter[0] = NewVec2((r32)appData->metaBallPos.x, (r32)appData->metaBallPos.y);
+		blobCenter[1] = NewVec2(FIXED_META_BALL_POS_Y, FIXED_META_BALL_POS_X);
+		blobCenter[2] = NewVec2((r32)mousePos.x / pixelSize, (r32)mousePos.y / pixelSize);
+		r32 blobRadius[NUM_BLOBS];
+		blobRadius[0] = appData->metaBallSize;
+		blobRadius[1] = FIXED_META_BALL_SIZE;
+		blobRadius[2] = MOUSE_META_BALL_SIZE;
+		
+		for (u32 bIndex = 0; bIndex < NUM_BLOBS; bIndex++)
+		{
+			rs->DrawCircle(blobCenter[bIndex] * pixelSize, blobRadius[bIndex] * pixelSize, {Color_HalfTransparent});
+		}
+	}
 	
 	// +================================+
 	// |   Tangent Vector Calculation   |
 	// +================================+
 	if (ButtonDown(Button_T))
 	{
-		rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Grid Pos: (%d, %d)", mPixPos.x, mPixPos.y);
+		rs->PrintString(NewVec2(0, 16 + appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Grid Pos: (%d, %d)", mPixPos.x, mPixPos.y);
 		rs->DrawButton(NewRectangle(mPixPos.x * pixelSize, mPixPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, {Color_Red});
 		rs->DrawButton(NewRectangle(
 			mPixPos.x * pixelSize - TANGENT_CHECK_RADIUS*pixelSize,
@@ -675,101 +955,93 @@ AppUpdate_DEFINITION(App_Update)
 	// +================================+
 	// |          Test Raycast          |
 	// +================================+
+	rs->DrawCircle(appData->testStartPos, 2, {Color_Red});
 	if (appData->testStartPos.x != mousePos.x || appData->testStartPos.y != mousePos.y)
 	{
 		v2i raycastEnd;
 		if (Raycast(appData, appData->testStartPos, mousePos - appData->testStartPos, pixelSize, &raycastEnd, appData->drawDebug ? rs : nullptr))
 		{
 			rs->DrawLine(appData->testStartPos, PixelCenter(pixelSize, raycastEnd.x, raycastEnd.y), {Color_Turquoise}, 1);
-			if (ButtonDown(MouseButton_Right))
+			if (ButtonDown(MouseButton_Left))
 			{
 				appData->testStartPixel = raycastEnd;
 			}
 		}
-		else
+		
+		if (appData->drawDebug)
 		{
-			rs->DrawLine(appData->testStartPos, mousePos, {Color_Purple});
+			rs->DrawLine(appData->testStartPos, appData->testStartPos + Vec2Normalize(mousePos - appData->testStartPos) * 1000, {Color_Purple});
+		}
+	}
+	
+	HighlightPixel(rs, pixelSize, appData->testStartPixel, {Color_Turquoise});
+	
+	// +==================================+
+	// |          Draw Vertices           |
+	// +==================================+
+	if (appData->vertices != nullptr)
+	{
+		for (u32 vIndex = 0; vIndex < appData->numVertices; vIndex++)
+		{
+			v2 currentVertex = appData->vertices[vIndex];
+			v2 nextVertex    = appData->vertices[(vIndex+1) % appData->numVertices];
+			
+			rs->DrawLine(currentVertex, nextVertex, {Color_Turquoise}, 1);
 		}
 	}
 	
 	// +================================+
-	// |        Step Around Test        |
+	// | Draw Debug FindOutlineVertices |
 	// +================================+
-	if (IsPixelFilled(GetColorInArrayAt(appData, appData->testStartPixel.x, appData->testStartPixel.y)))
+	if (ButtonDown(Button_Space))
 	{
-		v2i startPos = appData->testStartPixel;
-		v2 startPosCenter = PixelCenter(pixelSize, startPos.x, startPos.y);
-		v2 startPosTangent = Vec2_Zero;
-		HighlightPixel(rs, pixelSize, startPos, {Color_Turquoise});
+		FindOutlineVertices(appData, appData->testStartPixel, MAX_VERTICES, pixelSize, nullptr, rs);
+	}
+	
+	// +================================+
+	// |       Test Closest Point       |
+	// +================================+
+	if (ButtonDown(Button_C))
+	{
+		i32 closestSideIndex;
+		r32 closestDistance;
+		v2 closestPoint = FindClosestSide(appData, mousePos, &closestDistance, &closestSideIndex);
+		v2 vert1 = appData->vertices[closestSideIndex];
+		v2 vert2 = appData->vertices[(closestSideIndex+1) % appData->numVertices];
 		
-		v2i curPos = startPos;
-		for (i32 cIndex = 0; cIndex < 50; cIndex++)
-		{
-			v2 curCenter = PixelCenter(pixelSize, curPos.x, curPos.y);
-			v2 tangent = FindTangentVector(appData, curPos, TANGENT_CHECK_RADIUS, pixelSize);
-			if (cIndex == 0) startPosTangent = tangent;
-			
-			r32 stepSize = STEP_SIZE;
-			i32 divisionCount = 0;
-			v2 armEnd; v2i armEndPixPos; r32 dropDist; v2 perpDir; v2i newPos = Vec2i_Zero;
-			do
-			{
-				armEnd = curCenter + tangent * stepSize * pixelSize;
-				if (appData->drawDebug) { rs->DrawLine(curCenter, armEnd, MyColors[divisionCount], 2); }
-				
-				armEndPixPos = NewVec2i((i32)(armEnd.x / pixelSize), (i32)(armEnd.y / pixelSize));
-				perpDir = NewVec2(tangent.y, -tangent.x);
-				if (!IsPixelFilled(GetColorInArrayAt(appData, armEndPixPos.x, armEndPixPos.y)))
-				{
-					perpDir = NewVec2(-tangent.y, tangent.x);
-				}
-				
-				if (Raycast(appData, armEnd, perpDir, pixelSize, &newPos))
-				{
-					dropDist = Vec2Length(armEnd - PixelCenter(pixelSize, newPos.x, newPos.y));
-					if (dropDist <= MAX_DROP*pixelSize || divisionCount >= MAX_DIVISION_BACKSTEP-1)
-					{
-						break;
-					}
-				}
-				
-				stepSize = stepSize / 2;
-				
-				divisionCount++;
-				if (divisionCount >= MAX_DIVISION_BACKSTEP)
-				{
-					break;
-				}
-				
-			} while (true);
-			
-			if (appData->drawDebug)
-			{
-				// v2i dummyPixelPos;
-				// Raycast(appData, armEnd, perpDir, pixelSize, &dummyPixelPos, rs);
-				rs->DrawLine(armEnd, PixelCenter(pixelSize, newPos.x, newPos.y), {Color_Green});
-			}
-			
-			bool foundStart = false;
-			r32 distToStart = Vec2Length(PixelCenter(pixelSize, newPos.x, newPos.y) - startPosCenter);
-			if (cIndex != 0 &&
-				distToStart < STEP_SIZE*pixelSize &&
-				Vec2Dot(tangent, startPosTangent) > 0)
-			{
-				foundStart = true;
-				newPos = startPos;
-			}
-			
-			// rs->DrawLine(curCenter, armEnd, {Color_Red}, 2);
-			rs->DrawLine(curCenter, PixelCenter(pixelSize, newPos.x, newPos.y), {Color_Turquoise}, 2);
-			if (appData->drawDebug) { HighlightPixel(rs, pixelSize, newPos, {Color_Purple}); }
-			curPos = newPos;
-			
-			if (foundStart)
-			{
-				break;
-			}
-		}
+		rs->DrawLine(mousePos, closestPoint, {Color_Red}, 1);
+		rs->DrawLine(vert1, vert2, {Color_Red}, 1);
+		rs->DrawCircle(closestPoint, 2, {Color_Blue});
+	}
+	
+	rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Num Vertices: %u", appData->numVertices);
+	// rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Ball Pos: (%d, %d)", appData->metaBallPos.x, appData->metaBallPos.y);
+	
+	// +================================+
+	// |       Draw Controls Help       |
+	// +================================+
+	if (ButtonDown(Button_Tab))
+	{
+		rs->DrawButton(NewRectangle(10, 10, (r32)screenSize.x - 20, (r32)screenSize.y - 20), NewColor(0, 0, 0, 200), {Color_White}, 1);
+		
+		v2 textPos = NewVec2(20, 20 + appData->testFont.maxExtendUp);
+		
+		rs->DrawString("Left Click - Set first vertex position", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("Right Click - Set ray start pos", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("Space - Generate outline vertices from first position", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("R - Regenerate Bunker Texture", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("T - Test tangent calculation function", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("D - Toggle debug drawing", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("B - Generate bunker bevel texture", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("Arrow Keys - Move meta ball", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		rs->DrawString("Scroll Wheel - Scale meta ball", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+	}
+	else
+	{
+		const char* infoStr = "Hold [Tab] to see controls...";
+		v2 infoPos = NewVec2(10, screenSize.y - appData->testFont.maxExtendDown);
+		rs->DrawString(infoStr, infoPos + Vec2_One, NewColor(0, 0, 0, 200));
+		rs->DrawString(infoStr, infoPos, {Color_White});
 	}
 }
 
