@@ -356,6 +356,7 @@
 			"MouseButton_Left",
 			"MouseButton_Middle",
 			"MouseButton_Right",
+			"NUM_BLOBS",
 			"NUM_COLORS",
 			"NumCursorTypes",
 			"OPEN_CONSOLE_WINDOW",

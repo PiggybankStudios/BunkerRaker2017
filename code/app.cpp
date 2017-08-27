@@ -62,8 +62,18 @@ AppGetVersion_DEFINITION(App_GetVersion)
 	return version;
 }
 
-void FillColorArray(AppData_t* appData)
+void FillColorArray(AppData_t* appData, v2i mousePos)
 {
+	#define NUM_BLOBS 3
+	v2 blobCenter[NUM_BLOBS];
+	blobCenter[0] = NewVec2(20, 20);
+	blobCenter[1] = NewVec2(50, 20);
+	blobCenter[2] = NewVec2((r32)mousePos.x, (r32)mousePos.y);
+	r32 blobRadius[NUM_BLOBS];
+	blobRadius[0] = 10;
+	blobRadius[1] = 5;
+	blobRadius[2] = 15;
+	
 	v2 center = NewVec2(appData->colorArraySize.x/2.0f, appData->colorArraySize.y/2.0f);
 	for (i32 yPos = 0; yPos < appData->colorArraySize.x; yPos++)
 	{
@@ -75,20 +85,46 @@ void FillColorArray(AppData_t* appData)
 			u8* bluePntr   = &((u8*)colorPntr)[2];
 			u8* alphaPntr  = &((u8*)colorPntr)[3];
 			
-			*redPntr   = (u8)((r32)xPos / (r32)appData->colorArraySize.x * 255);
-			*greenPntr = (u8)((r32)yPos / (r32)appData->colorArraySize.y * 255);
-			*bluePntr  = 128;
-			*alphaPntr = 255;
+			Color_t pixelColor = { Color_Black };
 			
-			if (xPos%2 == 0) *bluePntr = 0;
-			if (yPos%2 == 0) *redPntr = 0;
+			// *redPntr   = 0; //(u8)((r32)xPos / (r32)appData->colorArraySize.x * 255);
+			// *greenPntr = 0; //(u8)((r32)yPos / (r32)appData->colorArraySize.y * 255);
+			// *bluePntr  = 0;
+			// *alphaPntr = 255;
 			
-			r32 sineValue = 50 + Sin32(xPos/10.0f)*20;
-			if (yPos < sineValue)
+			r32 value = 0;
+			for (i32 bIndex = 0; bIndex < NUM_BLOBS; bIndex++)
 			{
-				*colorPntr = 0x00000000;
-				*alphaPntr = 255;
+				r32 distance = Vec2Length(NewVec2((r32)xPos, (r32)yPos) - blobCenter[bIndex]);
+				r32 addValue = blobRadius[0] / distance;
+				value += addValue;
 			}
+			
+			if (value >= 1.0f)
+			{
+				pixelColor = { Color_SandyBrown };
+			}
+			
+			*redPntr = pixelColor.r;
+			*greenPntr = pixelColor.g;
+			*bluePntr = pixelColor.b;
+			*alphaPntr = pixelColor.a;
+			
+			// if (xPos%2 == 0) *bluePntr = 0;
+			// if (yPos%2 == 0) *redPntr = 0;
+			
+			// r32 sineValue = 100 + Sin32(xPos/30.0f)*50;
+			// if (yPos < sineValue)
+			// {
+			// 	*colorPntr = 0x00000000;
+			// 	*alphaPntr = 255;
+			// }
+			
+			// if ((rand() % 100) < 70)
+			// {
+			// 	*colorPntr = 0x00000000;
+			// 	*alphaPntr = 255;
+			// }
 			
 			// if (Vec2Length(NewVec2((r32)xPos, (r32)yPos) - center) > 45)
 			// {
@@ -168,7 +204,7 @@ AppInitialize_DEFINITION(App_Initialize)
 	
 	appData->colorArraySize = NewVec2i(100, 100);
 	appData->colorArray = PushArray(&appData->mainHeap, u32, appData->colorArraySize.x*appData->colorArraySize.y);
-	FillColorArray(appData);
+	FillColorArray(appData, NewVec2i(50, 50));
 	
 	DEBUG_WriteLine("Initialization Done!");
 }
@@ -185,7 +221,7 @@ AppReloaded_DEFINITION(App_Reloaded)
 	
 	DEBUG_WriteLine("Re-creating color array");
 	DestroyTexture(&appData->colorArrayTexture);
-	FillColorArray(appData);
+	FillColorArray(appData, NewVec2i(50, 50));
 }
 
 // +------------------------------------------------------------------+
@@ -201,15 +237,17 @@ AppUpdate_DEFINITION(App_Update)
 	v2i screenSize = PlatformInfo->screenSize;
 	r32 pixelSize = screenSize.x / (r32)appData->colorArrayTexture.width;
 	v2 mousePos = AppInput->mousePos;
+	v2i mPixPos = NewVec2i((i32)(mousePos.x / pixelSize), (i32)(mousePos.y / pixelSize));
+	v2 mPixCenter = NewVec2(mPixPos.x*pixelSize + pixelSize/2, mPixPos.y*pixelSize + pixelSize/2);
 	
 	// +================================+
 	// |        Recreate Texture        |
 	// +================================+
-	if (ButtonDown(Button_Control) && ButtonPressed(Button_R))
+	if (ButtonDown(Button_Control) && ButtonDown(Button_R))
 	{
 		DEBUG_WriteLine("Re-creating color array");
 		DestroyTexture(&appData->colorArrayTexture);
-		FillColorArray(appData);
+		FillColorArray(appData, mPixPos);
 	}
 	
 	// +==================================+
@@ -243,8 +281,6 @@ AppUpdate_DEFINITION(App_Update)
 	
 	#define TANGENT_CHECK_RADIUS 10
 	
-	v2i mPixPos = NewVec2i((i32)(mousePos.x / pixelSize), (i32)(mousePos.y / pixelSize));
-	v2 mPixCenter = NewVec2(mPixPos.x*pixelSize + pixelSize/2, mPixPos.y*pixelSize + pixelSize/2);
 	rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Grid Pos: (%d, %d)", mPixPos.x, mPixPos.y);
 	rs->DrawButton(NewRectangle(mPixPos.x * pixelSize, mPixPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, {Color_Red});
 	rs->DrawButton(NewRectangle(
