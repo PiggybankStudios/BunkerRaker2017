@@ -7,8 +7,12 @@ Description:
 	** Also includes all the other files that comprise the application 
 */
 
-#define RELOAD_APPLICATION  false
-#define TEST_FONT_SIZE      16
+#define RELOAD_APPLICATION    false
+#define TEST_FONT_SIZE        16
+#define TANGENT_CHECK_RADIUS  10
+#define STEP_SIZE             10
+#define MAX_DROP              5
+#define MAX_DIVISION_BACKSTEP 5
 
 #include <stdarg.h>
 #include "platformInterface.h"
@@ -62,6 +66,8 @@ AppGetVersion_DEFINITION(App_GetVersion)
 	return version;
 }
 
+const Color_t MyColors[] = { {Color_White}, {Color_Red}, {Color_Turquoise}, {Color_Purple}, {Color_Blue} };
+
 void FillColorArray(AppData_t* appData, v2i mousePos)
 {
 	#define NUM_BLOBS 3
@@ -70,7 +76,7 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 	blobCenter[1] = NewVec2(50, 20);
 	blobCenter[2] = NewVec2((r32)mousePos.x, (r32)mousePos.y);
 	r32 blobRadius[NUM_BLOBS];
-	blobRadius[0] = 10;
+	blobRadius[0] = 5;
 	blobRadius[1] = 5;
 	blobRadius[2] = 15;
 	
@@ -96,7 +102,7 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 			for (i32 bIndex = 0; bIndex < NUM_BLOBS; bIndex++)
 			{
 				r32 distance = Vec2Length(NewVec2((r32)xPos, (r32)yPos) - blobCenter[bIndex]);
-				r32 addValue = blobRadius[0] / distance;
+				r32 addValue = blobRadius[bIndex] / distance;
 				value += addValue;
 			}
 			
@@ -136,6 +142,11 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 	appData->colorArrayTexture = CreateTexture((u8*)appData->colorArray, appData->colorArraySize.x, appData->colorArraySize.y, true, false);
 }
 
+void HighlightPixel(RenderState_t* rs, r32 pixelSize, v2i pixelPos, Color_t color)
+{
+	rs->DrawButton(NewRectangle(pixelPos.x * pixelSize, pixelPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, color);
+}
+
 Color_t GetColorInArrayAt(AppData_t* appData, i32 xPos, i32 yPos)
 {
 	if (xPos < 0) return {Color_White};
@@ -169,9 +180,361 @@ bool IsPixelFilled(Color_t color)
 	}
 }
 
+bool IsPixelEdge(AppData_t* appData, i32 xPos, i32 yPos)
+{
+	bool result = false;
+	
+	Color_t pixels[3][3];
+	// pixels[0][0] = GetColorInArrayAt(appData, xPos-1, yPos-1);
+	pixels[1][0] = GetColorInArrayAt(appData, xPos,   yPos-1);
+	// pixels[2][0] = GetColorInArrayAt(appData, xPos+1, yPos-1);
+	pixels[0][1] = GetColorInArrayAt(appData, xPos-1, yPos);
+	pixels[1][1] = GetColorInArrayAt(appData, xPos,   yPos);
+	pixels[2][1] = GetColorInArrayAt(appData, xPos+1, yPos);
+	// pixels[0][2] = GetColorInArrayAt(appData, xPos-1, yPos+1);
+	pixels[1][2] = GetColorInArrayAt(appData, xPos,   yPos+1);
+	// pixels[2][2] = GetColorInArrayAt(appData, xPos+1, yPos+1);
+	
+	if (IsPixelFilled(pixels[1][1]))
+	{
+		if (!IsPixelFilled(pixels[1][0]) ||
+		    !IsPixelFilled(pixels[2][1]) ||
+		    !IsPixelFilled(pixels[1][2]) ||
+		    !IsPixelFilled(pixels[0][1]))
+		{
+			result = true;
+		}
+	}
+	
+	return result;
+}
+
 v2 PixelCenter(r32 pixelSize, i32 xPos, i32 yPos)
 {
 	return NewVec2(xPos*pixelSize + pixelSize/2, yPos*pixelSize + pixelSize/2);
+}
+
+bool Raycast(AppData_t* appData, v2 startPos, v2 direction, r32 pixelSize, v2i* endPosOut, RenderState_t* rs = nullptr)
+{
+	v2i curPixel = NewVec2i((i32)(startPos.x / pixelSize), (i32)(startPos.y / pixelSize));
+	v2 offset = startPos - NewVec2(curPixel.x * pixelSize, curPixel.y * pixelSize);
+	v2 dir = Vec2Normalize(direction);
+	
+	if (dir.x == 0 && dir.y == 0)
+	{
+		return false;
+	}
+	
+	while (!IsPixelEdge(appData, curPixel.x, curPixel.y))
+	{
+		if (rs != nullptr)
+		{
+			HighlightPixel(rs, pixelSize, curPixel, {Color_Yellow});
+		}
+		
+		r32 xDist = 0;
+		if (dir.x > 0)
+		{
+			xDist = pixelSize - offset.x;
+		}
+		else if (dir.x < 0)
+		{
+			xDist = offset.x;
+		}
+		else
+		{
+			//no x-axis movement
+		}
+		
+		r32 yDist = 0;
+		if (dir.y > 0)
+		{
+			yDist = pixelSize - offset.y;
+		}
+		else if (dir.y < 0)
+		{
+			yDist = offset.y;
+		}
+		else
+		{
+			//no y-axis movement
+		}
+		
+		r32 xTime = 0;
+		if (dir.x != 0)
+		{
+			xTime = xDist / Abs32(dir.x);
+		}
+		
+		r32 yTime = 0;
+		if (dir.y != 0)
+		{
+			yTime = yDist / Abs32(dir.y);
+		}
+		
+		if (dir.x != 0 && (dir.y == 0 || xTime <= yTime))
+		{
+			//Move along x-axis
+			if (dir.x > 0)
+			{
+				curPixel.x += 1;
+				offset.x = 0;
+				offset.y += dir.y * xTime;
+			}
+			else
+			{
+				curPixel.x -= 1;
+				offset.x = pixelSize;
+				offset.y += dir.y * xTime;
+			}
+		}
+		else
+		{
+			//Move along y-axis
+			if (dir.y > 0)
+			{
+				curPixel.y += 1;
+				offset.y = 0;
+				offset.x += dir.x * yTime;
+			}
+			else
+			{
+				curPixel.y -= 1;
+				offset.y = pixelSize;
+				offset.x += dir.x * yTime;
+			}
+		}
+		
+		if (curPixel.x < 0)
+		{
+			return false;
+		}
+		if (curPixel.y < 0)
+		{
+			return false;
+		}
+		if (curPixel.x >= appData->colorArraySize.x)
+		{
+			return false;
+		}
+		if (curPixel.y >= appData->colorArraySize.y)
+		{
+			return false;
+		}
+	}
+	
+	if (rs != nullptr)
+	{
+		HighlightPixel(rs, pixelSize, curPixel, {Color_Red});
+	}
+	
+	*endPosOut = curPixel;
+	return true;
+}
+
+v2 FindTangentVector(AppData_t* appData, v2i position, i32 averageRadius, r32 pixelSize, RenderState_t* rs = nullptr)
+{
+	v2i minPos = NewVec2i(max(0, position.x - averageRadius), max(0, position.y - averageRadius));
+	v2i maxPos = NewVec2i(min(appData->colorArraySize.x, position.x + averageRadius), min(appData->colorArraySize.y, position.y + averageRadius));
+	v2 startPixCenter = PixelCenter(pixelSize, position.x, position.y);
+	
+	v2 result = Vec2_Zero;
+	u32 numVectors = 0;
+	for (i32 yPos = minPos.y; yPos <= maxPos.y; yPos++)
+	{
+		for (i32 xPos = minPos.x; xPos <= maxPos.x; xPos++)
+		{
+			v2 pixelCenter = PixelCenter(pixelSize, xPos, yPos);
+			if (Vec2Length(pixelCenter - startPixCenter) <= averageRadius*pixelSize)
+			{
+				Color_t pixels[3][3];
+				pixels[0][0] = GetColorInArrayAt(appData, xPos-1, yPos-1);
+				pixels[1][0] = GetColorInArrayAt(appData, xPos,   yPos-1);
+				pixels[2][0] = GetColorInArrayAt(appData, xPos+1, yPos-1);
+				pixels[0][1] = GetColorInArrayAt(appData, xPos-1, yPos);
+				pixels[1][1] = GetColorInArrayAt(appData, xPos,   yPos);
+				pixels[2][1] = GetColorInArrayAt(appData, xPos+1, yPos);
+				pixels[0][2] = GetColorInArrayAt(appData, xPos-1, yPos+1);
+				pixels[1][2] = GetColorInArrayAt(appData, xPos,   yPos+1);
+				pixels[2][2] = GetColorInArrayAt(appData, xPos+1, yPos+1);
+				Color_t* curPixel = &pixels[1][1];
+				
+				v2 centers[3][3];
+				centers[0][0] = PixelCenter(pixelSize, xPos-1, yPos-1);
+				centers[1][0] = PixelCenter(pixelSize, xPos,   yPos-1);
+				centers[2][0] = PixelCenter(pixelSize, xPos+1, yPos-1);
+				centers[0][1] = PixelCenter(pixelSize, xPos-1, yPos);
+				centers[1][1] = PixelCenter(pixelSize, xPos,   yPos);
+				centers[2][1] = PixelCenter(pixelSize, xPos+1, yPos);
+				centers[0][2] = PixelCenter(pixelSize, xPos-1, yPos+1);
+				centers[1][2] = PixelCenter(pixelSize, xPos,   yPos+1);
+				centers[2][2] = PixelCenter(pixelSize, xPos+1, yPos+1);
+				
+				if (IsPixelFilled(*curPixel) &&
+					(!IsPixelFilled(pixels[1][0]) || !IsPixelFilled(pixels[1][2]) || 
+					 !IsPixelFilled(pixels[0][1]) || !IsPixelFilled(pixels[2][1])))
+				{
+					if (rs != nullptr)
+					{
+						HighlightPixel(rs, pixelSize, NewVec2i(xPos, yPos), {Color_White});
+					}
+					
+					Color_t lineColor = ColorTransparent({Color_Yellow}, 0.5f);
+					r32 lineThickness = 2;
+					//Top Left to Top Middle
+					if (!IsPixelFilled(pixels[0][0]) && !IsPixelFilled(pixels[1][0]) &&
+						IsPixelFilled(pixels[0][1]))
+					{
+						v2 vector = Vec2Normalize(centers[1][0] - centers[0][0]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[1][0], centers[0][0], lineColor, lineThickness);
+						}
+					}
+					//Top Middle to Top Right
+					if (!IsPixelFilled(pixels[1][0]) && !IsPixelFilled(pixels[2][0]) &&
+						IsPixelFilled(pixels[2][1]))
+					{
+						v2 vector = Vec2Normalize(centers[2][0] - centers[1][0]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[2][0], centers[1][0], lineColor, lineThickness);
+						}
+					}
+					//Top Right to Right
+					if (!IsPixelFilled(pixels[2][0]) && !IsPixelFilled(pixels[2][1]) &&
+						IsPixelFilled(pixels[1][0]))
+					{
+						v2 vector = Vec2Normalize(centers[2][1] - centers[2][0]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[2][1], centers[2][0], lineColor, lineThickness);
+						}
+					}
+					//Right to Bottom Right
+					if (!IsPixelFilled(pixels[2][1]) && !IsPixelFilled(pixels[2][2]) &&
+						IsPixelFilled(pixels[1][2]))
+					{
+						v2 vector = Vec2Normalize(centers[2][2] - centers[2][1]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[2][2], centers[2][1], lineColor, lineThickness);
+						}
+					}
+					//Bottom Right to Bottom Middle
+					if (!IsPixelFilled(pixels[2][2]) && !IsPixelFilled(pixels[1][2]) &&
+						IsPixelFilled(pixels[2][1]))
+					{
+						v2 vector = Vec2Normalize(centers[1][2] - centers[2][2]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[1][2], centers[2][2], lineColor, lineThickness);
+						}
+					}
+					//Bottom Middle to Bottom Left
+					if (!IsPixelFilled(pixels[1][2]) && !IsPixelFilled(pixels[0][2]) &&
+						IsPixelFilled(pixels[0][1]))
+					{
+						v2 vector = Vec2Normalize(centers[0][2] - centers[1][2]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[0][2], centers[1][2], lineColor, lineThickness);
+						}
+					}
+					//Bottom Left to Left
+					if (!IsPixelFilled(pixels[0][2]) && !IsPixelFilled(pixels[0][1]) &&
+						IsPixelFilled(pixels[1][2]))
+					{
+						v2 vector = Vec2Normalize(centers[0][1] - centers[0][2]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[0][1], centers[0][2], lineColor, lineThickness);
+						}
+					}
+					//Left to Top Left
+					if (!IsPixelFilled(pixels[0][1]) && !IsPixelFilled(pixels[0][0]) &&
+						IsPixelFilled(pixels[1][0]))
+					{
+						v2 vector = Vec2Normalize(centers[0][0] - centers[0][1]);
+						result += vector;
+						numVectors++;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[0][0], centers[0][1], lineColor, lineThickness);
+						}
+					}
+					
+					//Left to Top
+					if (!IsPixelFilled(pixels[0][1]) && !IsPixelFilled(pixels[1][0]))
+					{
+						v2 vector = Vec2Normalize(centers[1][0] - centers[0][1]);
+						result += vector;
+						result += vector;
+						numVectors += 2;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[1][0], centers[0][1], lineColor, lineThickness);
+						}
+					}
+					//Top to Right
+					if (!IsPixelFilled(pixels[1][0]) && !IsPixelFilled(pixels[2][1]))
+					{
+						v2 vector = Vec2Normalize(centers[2][1] - centers[1][0]);
+						result += vector;
+						result += vector;
+						numVectors += 2;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[2][1], centers[1][0], lineColor, lineThickness);
+						}
+					}
+					//Right to Bottom
+					if (!IsPixelFilled(pixels[2][1]) && !IsPixelFilled(pixels[1][2]))
+					{
+						v2 vector = Vec2Normalize(centers[1][2] - centers[2][1]);
+						result += vector;
+						result += vector;
+						numVectors += 2;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[1][2], centers[2][1], lineColor, lineThickness);
+						}
+					}
+					//Bottom to Left
+					if (!IsPixelFilled(pixels[1][2]) && !IsPixelFilled(pixels[0][1]))
+					{
+						v2 vector = Vec2Normalize(centers[0][1] - centers[1][2]);
+						result += vector;
+						result += vector;
+						numVectors += 2;
+						if (rs != nullptr)
+						{
+							rs->DrawLine(centers[0][1], centers[1][2], lineColor, lineThickness);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	result.x = (result.x / (r32)numVectors);
+	result.y = (result.y / (r32)numVectors);
+	
+	return result;
 }
 
 // +------------------------------------------------------------------+
@@ -250,6 +613,16 @@ AppUpdate_DEFINITION(App_Update)
 		FillColorArray(appData, mPixPos);
 	}
 	
+	if (ButtonPressed(MouseButton_Left))
+	{
+		appData->testStartPos = mousePos;
+	}
+	
+	if (ButtonPressed(Button_D))
+	{
+		appData->drawDebug = !appData->drawDebug;
+	}
+	
 	// +==================================+
 	// |         Rendering Setup          |
 	// +==================================+
@@ -279,179 +652,125 @@ AppUpdate_DEFINITION(App_Update)
 	rs->BindTexture(&appData->colorArrayTexture);
 	rs->DrawTexturedRec(NewRectangle(0, 0, (r32)screenSize.x, (r32)screenSize.y), {Color_White});
 	
-	#define TANGENT_CHECK_RADIUS 10
-	
-	rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Grid Pos: (%d, %d)", mPixPos.x, mPixPos.y);
-	rs->DrawButton(NewRectangle(mPixPos.x * pixelSize, mPixPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, {Color_Red});
-	rs->DrawButton(NewRectangle(
-		mPixPos.x * pixelSize - TANGENT_CHECK_RADIUS*pixelSize,
-		mPixPos.y * pixelSize - TANGENT_CHECK_RADIUS*pixelSize,
-		TANGENT_CHECK_RADIUS*pixelSize*2 + pixelSize,
-		TANGENT_CHECK_RADIUS*pixelSize*2 + pixelSize),
-		{Color_TransparentBlack}, {Color_Red}
-	);
-	
-	v2i minPos = NewVec2i(max(0, mPixPos.x - TANGENT_CHECK_RADIUS), max(0, mPixPos.y - TANGENT_CHECK_RADIUS));
-	v2i maxPos = NewVec2i(min(appData->colorArraySize.x, mPixPos.x + TANGENT_CHECK_RADIUS), min(appData->colorArraySize.y, mPixPos.y + TANGENT_CHECK_RADIUS));
-	
-	v2 resultVector = Vec2_Zero;
-	u32 numVectors = 0;
-	for (i32 yPos = minPos.y; yPos <= maxPos.y; yPos++)
+	// +================================+
+	// |   Tangent Vector Calculation   |
+	// +================================+
+	if (ButtonDown(Button_T))
 	{
-		for (i32 xPos = minPos.x; xPos <= maxPos.x; xPos++)
+		rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Grid Pos: (%d, %d)", mPixPos.x, mPixPos.y);
+		rs->DrawButton(NewRectangle(mPixPos.x * pixelSize, mPixPos.y * pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, {Color_Red});
+		rs->DrawButton(NewRectangle(
+			mPixPos.x * pixelSize - TANGENT_CHECK_RADIUS*pixelSize,
+			mPixPos.y * pixelSize - TANGENT_CHECK_RADIUS*pixelSize,
+			TANGENT_CHECK_RADIUS*pixelSize*2 + pixelSize,
+			TANGENT_CHECK_RADIUS*pixelSize*2 + pixelSize),
+			{Color_TransparentBlack}, {Color_Red}
+		);
+		
+		v2 testTangent = FindTangentVector(appData, mPixPos, TANGENT_CHECK_RADIUS, pixelSize, rs);
+		
+		rs->DrawLine(mousePos - testTangent*50, mousePos + testTangent*50, {Color_Cyan});
+	}
+	
+	// +================================+
+	// |          Test Raycast          |
+	// +================================+
+	if (appData->testStartPos.x != mousePos.x || appData->testStartPos.y != mousePos.y)
+	{
+		v2i raycastEnd;
+		if (Raycast(appData, appData->testStartPos, mousePos - appData->testStartPos, pixelSize, &raycastEnd, appData->drawDebug ? rs : nullptr))
 		{
-			v2 pixelCenter = PixelCenter(pixelSize, xPos, yPos);
-			if (Vec2Length(pixelCenter - mPixCenter) <= TANGENT_CHECK_RADIUS*pixelSize)
+			rs->DrawLine(appData->testStartPos, PixelCenter(pixelSize, raycastEnd.x, raycastEnd.y), {Color_Turquoise}, 1);
+			if (ButtonDown(MouseButton_Right))
 			{
-				Color_t pixels[3][3];
-				pixels[0][0] = GetColorInArrayAt(appData, xPos-1, yPos-1);
-				pixels[1][0] = GetColorInArrayAt(appData, xPos,   yPos-1);
-				pixels[2][0] = GetColorInArrayAt(appData, xPos+1, yPos-1);
-				pixels[0][1] = GetColorInArrayAt(appData, xPos-1, yPos);
-				pixels[1][1] = GetColorInArrayAt(appData, xPos,   yPos);
-				pixels[2][1] = GetColorInArrayAt(appData, xPos+1, yPos);
-				pixels[0][2] = GetColorInArrayAt(appData, xPos-1, yPos+1);
-				pixels[1][2] = GetColorInArrayAt(appData, xPos,   yPos+1);
-				pixels[2][2] = GetColorInArrayAt(appData, xPos+1, yPos+1);
-				Color_t* curPixel = &pixels[1][1];
-				
-				v2 centers[3][3];
-				centers[0][0] = PixelCenter(pixelSize, xPos-1, yPos-1);
-				centers[1][0] = PixelCenter(pixelSize, xPos,   yPos-1);
-				centers[2][0] = PixelCenter(pixelSize, xPos+1, yPos-1);
-				centers[0][1] = PixelCenter(pixelSize, xPos-1, yPos);
-				centers[1][1] = PixelCenter(pixelSize, xPos,   yPos);
-				centers[2][1] = PixelCenter(pixelSize, xPos+1, yPos);
-				centers[0][2] = PixelCenter(pixelSize, xPos-1, yPos+1);
-				centers[1][2] = PixelCenter(pixelSize, xPos,   yPos+1);
-				centers[2][2] = PixelCenter(pixelSize, xPos+1, yPos+1);
-				
-				if (IsPixelFilled(*curPixel) &&
-					(!IsPixelFilled(pixels[1][0]) || !IsPixelFilled(pixels[1][2]) || 
-					 !IsPixelFilled(pixels[0][1]) || !IsPixelFilled(pixels[2][1])))
-				{
-					rs->DrawButton(NewRectangle(xPos*pixelSize, yPos*pixelSize, pixelSize, pixelSize), {Color_TransparentBlack}, {Color_White});
-					
-					Color_t lineColor = ColorTransparent({Color_Yellow}, 0.5f);
-					r32 lineThickness = 2;
-					//Top Left to Top Middle
-					if (!IsPixelFilled(pixels[0][0]) && !IsPixelFilled(pixels[1][0]) &&
-						IsPixelFilled(pixels[0][1]))
-					{
-						v2 vector = Vec2Normalize(centers[1][0] - centers[0][0]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[1][0], centers[0][0], lineColor, lineThickness);
-					}
-					//Top Middle to Top Right
-					if (!IsPixelFilled(pixels[1][0]) && !IsPixelFilled(pixels[2][0]) &&
-						IsPixelFilled(pixels[2][1]))
-					{
-						v2 vector = Vec2Normalize(centers[2][0] - centers[1][0]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[2][0], centers[1][0], lineColor, lineThickness);
-					}
-					//Top Right to Right
-					if (!IsPixelFilled(pixels[2][0]) && !IsPixelFilled(pixels[2][1]) &&
-						IsPixelFilled(pixels[1][0]))
-					{
-						v2 vector = Vec2Normalize(centers[2][1] - centers[2][0]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[2][1], centers[2][0], lineColor, lineThickness);
-					}
-					//Right to Bottom Right
-					if (!IsPixelFilled(pixels[2][1]) && !IsPixelFilled(pixels[2][2]) &&
-						IsPixelFilled(pixels[1][2]))
-					{
-						v2 vector = Vec2Normalize(centers[2][2] - centers[2][1]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[2][2], centers[2][1], lineColor, lineThickness);
-					}
-					//Bottom Right to Bottom Middle
-					if (!IsPixelFilled(pixels[2][2]) && !IsPixelFilled(pixels[1][2]) &&
-						IsPixelFilled(pixels[2][1]))
-					{
-						v2 vector = Vec2Normalize(centers[1][2] - centers[2][2]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[1][2], centers[2][2], lineColor, lineThickness);
-					}
-					//Bottom Middle to Bottom Left
-					if (!IsPixelFilled(pixels[1][2]) && !IsPixelFilled(pixels[0][2]) &&
-						IsPixelFilled(pixels[0][1]))
-					{
-						v2 vector = Vec2Normalize(centers[0][2] - centers[1][2]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[0][2], centers[1][2], lineColor, lineThickness);
-					}
-					//Bottom Left to Left
-					if (!IsPixelFilled(pixels[0][2]) && !IsPixelFilled(pixels[0][1]) &&
-						IsPixelFilled(pixels[1][2]))
-					{
-						v2 vector = Vec2Normalize(centers[0][1] - centers[0][2]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[0][1], centers[0][2], lineColor, lineThickness);
-					}
-					//Left to Top Left
-					if (!IsPixelFilled(pixels[0][1]) && !IsPixelFilled(pixels[0][0]) &&
-						IsPixelFilled(pixels[1][0]))
-					{
-						v2 vector = Vec2Normalize(centers[0][0] - centers[0][1]);
-						resultVector += vector;
-						numVectors++;
-						rs->DrawLine(centers[0][0], centers[0][1], lineColor, lineThickness);
-					}
-					
-					//Left to Top
-					if (!IsPixelFilled(pixels[0][1]) && !IsPixelFilled(pixels[1][0]))
-					{
-						v2 vector = Vec2Normalize(centers[1][0] - centers[0][1]);
-						resultVector += vector;
-						resultVector += vector;
-						numVectors += 2;
-						rs->DrawLine(centers[1][0], centers[0][1], lineColor, lineThickness);
-					}
-					//Top to Right
-					if (!IsPixelFilled(pixels[1][0]) && !IsPixelFilled(pixels[2][1]))
-					{
-						v2 vector = Vec2Normalize(centers[2][1] - centers[1][0]);
-						resultVector += vector;
-						resultVector += vector;
-						numVectors += 2;
-						rs->DrawLine(centers[2][1], centers[1][0], lineColor, lineThickness);
-					}
-					//Right to Bottom
-					if (!IsPixelFilled(pixels[2][1]) && !IsPixelFilled(pixels[1][2]))
-					{
-						v2 vector = Vec2Normalize(centers[1][2] - centers[2][1]);
-						resultVector += vector;
-						resultVector += vector;
-						numVectors += 2;
-						rs->DrawLine(centers[1][2], centers[2][1], lineColor, lineThickness);
-					}
-					//Bottom to Left
-					if (!IsPixelFilled(pixels[1][2]) && !IsPixelFilled(pixels[0][1]))
-					{
-						v2 vector = Vec2Normalize(centers[0][1] - centers[1][2]);
-						resultVector += vector;
-						resultVector += vector;
-						numVectors += 2;
-						rs->DrawLine(centers[0][1], centers[1][2], lineColor, lineThickness);
-					}
-				}
+				appData->testStartPixel = raycastEnd;
 			}
+		}
+		else
+		{
+			rs->DrawLine(appData->testStartPos, mousePos, {Color_Purple});
 		}
 	}
 	
-	resultVector.x = (resultVector.x / (r32)numVectors);
-	resultVector.y = (resultVector.y / (r32)numVectors);
-	
-	rs->DrawLine(mousePos - resultVector*50, mousePos + resultVector*50, {Color_Cyan});
+	// +================================+
+	// |        Step Around Test        |
+	// +================================+
+	if (IsPixelFilled(GetColorInArrayAt(appData, appData->testStartPixel.x, appData->testStartPixel.y)))
+	{
+		v2i startPos = appData->testStartPixel;
+		v2 startPosCenter = PixelCenter(pixelSize, startPos.x, startPos.y);
+		v2 startPosTangent = Vec2_Zero;
+		HighlightPixel(rs, pixelSize, startPos, {Color_Turquoise});
+		
+		v2i curPos = startPos;
+		for (i32 cIndex = 0; cIndex < 50; cIndex++)
+		{
+			v2 curCenter = PixelCenter(pixelSize, curPos.x, curPos.y);
+			v2 tangent = FindTangentVector(appData, curPos, TANGENT_CHECK_RADIUS, pixelSize);
+			if (cIndex == 0) startPosTangent = tangent;
+			
+			r32 stepSize = STEP_SIZE;
+			i32 divisionCount = 0;
+			v2 armEnd; v2i armEndPixPos; r32 dropDist; v2 perpDir; v2i newPos = Vec2i_Zero;
+			do
+			{
+				armEnd = curCenter + tangent * stepSize * pixelSize;
+				if (appData->drawDebug) { rs->DrawLine(curCenter, armEnd, MyColors[divisionCount], 2); }
+				
+				armEndPixPos = NewVec2i((i32)(armEnd.x / pixelSize), (i32)(armEnd.y / pixelSize));
+				perpDir = NewVec2(tangent.y, -tangent.x);
+				if (!IsPixelFilled(GetColorInArrayAt(appData, armEndPixPos.x, armEndPixPos.y)))
+				{
+					perpDir = NewVec2(-tangent.y, tangent.x);
+				}
+				
+				if (Raycast(appData, armEnd, perpDir, pixelSize, &newPos))
+				{
+					dropDist = Vec2Length(armEnd - PixelCenter(pixelSize, newPos.x, newPos.y));
+					if (dropDist <= MAX_DROP*pixelSize || divisionCount >= MAX_DIVISION_BACKSTEP-1)
+					{
+						break;
+					}
+				}
+				
+				stepSize = stepSize / 2;
+				
+				divisionCount++;
+				if (divisionCount >= MAX_DIVISION_BACKSTEP)
+				{
+					break;
+				}
+				
+			} while (true);
+			
+			if (appData->drawDebug)
+			{
+				// v2i dummyPixelPos;
+				// Raycast(appData, armEnd, perpDir, pixelSize, &dummyPixelPos, rs);
+				rs->DrawLine(armEnd, PixelCenter(pixelSize, newPos.x, newPos.y), {Color_Green});
+			}
+			
+			bool foundStart = false;
+			r32 distToStart = Vec2Length(PixelCenter(pixelSize, newPos.x, newPos.y) - startPosCenter);
+			if (cIndex != 0 &&
+				distToStart < STEP_SIZE*pixelSize &&
+				Vec2Dot(tangent, startPosTangent) > 0)
+			{
+				foundStart = true;
+				newPos = startPos;
+			}
+			
+			// rs->DrawLine(curCenter, armEnd, {Color_Red}, 2);
+			rs->DrawLine(curCenter, PixelCenter(pixelSize, newPos.x, newPos.y), {Color_Turquoise}, 2);
+			if (appData->drawDebug) { HighlightPixel(rs, pixelSize, newPos, {Color_Purple}); }
+			curPos = newPos;
+			
+			if (foundStart)
+			{
+				break;
+			}
+		}
+	}
 }
 
 // +----------------------------------------------------------------+

@@ -386,7 +386,7 @@ void RenderState_t::DrawLine(v2 startPos, v2 endPos, Color_t color, r32 width)
 	r32 lineLength = Vec2Length(endPos-startPos);
 	r32 lineRotation = (r32)atan2(endPos.y - startPos.y, endPos.x - startPos.x);
 	
-	m4 worldMatrix = Matrix4Translate(NewVec3(0, -0.0f, 0.0f));
+	m4 worldMatrix = Matrix4Translate(NewVec3(0, -0.5f, 0.0f));
 	worldMatrix = Matrix4Scale(NewVec3(lineLength, width, 1.0f)) * worldMatrix;
 	worldMatrix = Matrix4RotateZ(lineRotation) * worldMatrix;
 	worldMatrix = Matrix4Translate(NewVec3(startPos.x, startPos.y, 0.0f)) * worldMatrix;

@@ -19,6 +19,10 @@ struct AppData_t
 	v2i colorArraySize;
 	u32* colorArray;
 	Texture_t colorArrayTexture;
+	
+	v2 testStartPos;
+	v2i testStartPixel;
+	bool drawDebug;
 };
 
 #endif // _APP_DATA_H
