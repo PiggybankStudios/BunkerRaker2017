@@ -7,16 +7,16 @@ Description:
 	** Also includes all the other files that comprise the application 
 */
 
-#define RELOAD_APPLICATION    false
+#define RELOAD_APPLICATION    true
 #define TEST_FONT_SIZE        16
 
-#define COLOAR_ARRAY_WIDTH    600
-#define COLOAR_ARRAY_HEIGHT   600
+#define COLOAR_ARRAY_WIDTH    100
+#define COLOAR_ARRAY_HEIGHT   100
 
-#define FIXED_META_BALL_POS_X 300
-#define FIXED_META_BALL_POS_Y 300
-#define FIXED_META_BALL_SIZE  10
-#define MOUSE_META_BALL_SIZE  15
+#define FIXED_META_BALL_POS_X 50
+#define FIXED_META_BALL_POS_Y 50
+#define FIXED_META_BALL_SIZE  5
+#define MOUSE_META_BALL_SIZE  10
 
 #define TANGENT_CHECK_RADIUS  10
 #define STEP_SIZE             10
@@ -166,7 +166,7 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 			// }
 		}
 	}
-	appData->colorArrayTexture = CreateTexture((u8*)appData->colorArray, appData->colorArraySize.x, appData->colorArraySize.y, false, false);
+	appData->colorArrayTexture = CreateTexture((u8*)appData->colorArray, appData->colorArraySize.x, appData->colorArraySize.y, true, false);
 }
 
 
@@ -729,8 +729,10 @@ void GenerateBevelOverlay(AppData_t* appData, r32 pixelSize, r32 bevelSize, r32 
 			}
 		}
 	}
-	appData->bevelOverlayTexture = CreateTexture((u8*)appData->bevelOverlayColors, appData->colorArraySize.x, appData->colorArraySize.y, false, false);
+	appData->bevelOverlayTexture = CreateTexture((u8*)appData->bevelOverlayColors, appData->colorArraySize.x, appData->colorArraySize.y, true, false);
 }
+
+u32 GetBunkerSlices(AppData_t* appData, v2 sliceVec, Span_t* spanBufferOut = nullptr)
 
 // +------------------------------------------------------------------+
 // |                          AppInitialize                           |
@@ -854,8 +856,8 @@ AppUpdate_DEFINITION(App_Update)
 	if (ButtonPressed(Button_B))
 	{
 		DEBUG_WriteLine("Beveling the bunker");
-		GenerateBevelOverlay(appData, pixelSize, 20 * pixelSize, 0.05f, false);
-		GenerateBevelOverlay(appData, pixelSize, 10 * pixelSize, 0.15f, true);
+		GenerateBevelOverlay(appData, pixelSize, 10 * pixelSize, 0.05f, false);
+		GenerateBevelOverlay(appData, pixelSize, 5 * pixelSize, 0.15f, true);
 	}
 	
 	// +================================+
@@ -979,7 +981,7 @@ AppUpdate_DEFINITION(App_Update)
 	// +==================================+
 	// |          Draw Vertices           |
 	// +==================================+
-	if (appData->vertices != nullptr)
+	if (true && appData->vertices != nullptr)
 	{
 		for (u32 vIndex = 0; vIndex < appData->numVertices; vIndex++)
 		{

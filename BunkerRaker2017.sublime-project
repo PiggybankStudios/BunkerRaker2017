@@ -452,6 +452,7 @@
 			"RenderState_t",
 			"SYSTEMTIME",
 			"Shader_t",
+			"Span_t",
 			"Texture_t",
 			"Transform2D_t",
 			"Transform_t",

@@ -107,4 +107,15 @@ struct FrameBuffer_t
 	const Texture_t* renderTexture;
 };
 
+typedef union
+{
+	v2 vector;
+	r32 values[2];
+	struct
+	{
+		r32 start;
+		r32 end;
+	};
+} Span_t;
+
 #endif // _APP_STRUCTS_H
