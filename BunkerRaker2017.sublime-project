@@ -453,6 +453,8 @@
 			"SYSTEMTIME",
 			"Shader_t",
 			"Span_t",
+			"TempListItem_t",
+			"TempList_t",
 			"Texture_t",
 			"Transform2D_t",
 			"Transform_t",

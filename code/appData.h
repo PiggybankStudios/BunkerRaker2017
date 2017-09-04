@@ -10,6 +10,7 @@ Date:   08\26\2017
 struct AppData_t
 {
 	MemoryArena_t mainHeap;
+	MemoryArena_t tempArena;
 	
 	Texture_t testTexture;
 	Font_t testFont;

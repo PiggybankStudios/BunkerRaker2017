@@ -7,7 +7,7 @@ Description:
 	** Also includes all the other files that comprise the application 
 */
 
-#define RELOAD_APPLICATION    true
+#define RELOAD_APPLICATION    false
 #define TEST_FONT_SIZE        16
 
 #define COLOAR_ARRAY_WIDTH    100
@@ -35,6 +35,9 @@ Description:
 #include "memoryArena.h"
 #include "linkedList.h"
 #include "easing.h"
+#include "tempMemory.h"
+#include "tempMemory.cpp"
+#include "tempList.h"
 
 const PlatformInfo_t* Gl_PlatformInfo = nullptr;
 const AppMemory_t*    Gl_AppMemory    = nullptr;
@@ -733,6 +736,10 @@ void GenerateBevelOverlay(AppData_t* appData, r32 pixelSize, r32 bevelSize, r32 
 }
 
 u32 GetBunkerSlices(AppData_t* appData, v2 sliceVec, Span_t* spanBufferOut = nullptr)
+{
+	
+	return 0;
+}
 
 // +------------------------------------------------------------------+
 // |                          AppInitialize                           |
@@ -750,6 +757,10 @@ AppInitialize_DEFINITION(App_Initialize)
 	void* arenaBase = (void*)(appData+1);
 	u32 arenaSize = AppMemory->permanantSize - sizeof(AppData_t);
 	InitializeMemoryArenaHeap(&appData->mainHeap, arenaBase, arenaSize);
+	
+	InitializeMemoryArenaTemp(&appData->tempArena, AppMemory->transientPntr, AppMemory->transientSize, 16);
+	TempArena = &appData->tempArena;
+	TempPushMark();
 	
 	v2i screenSize = PlatformInfo->screenSize;
 	r32 pixelSize = screenSize.x / (r32)appData->colorArrayTexture.width;
@@ -773,6 +784,7 @@ AppInitialize_DEFINITION(App_Initialize)
 	appData->bevelOverlayColors = PushArray(&appData->mainHeap, u32, appData->colorArraySize.x*appData->colorArraySize.y);
 	GenerateBevelOverlay(appData, pixelSize, 10, 0.1f);
 	
+	TempPopMark();
 	DEBUG_WriteLine("Initialization Done!");
 }
 
@@ -802,6 +814,9 @@ AppUpdate_DEFINITION(App_Update)
 	Gl_AppMemory = AppMemory;
 	AppData_t* appData = (AppData_t*)AppMemory->permanantPntr;
 	GL_AppData = appData;
+	TempArena = &appData->tempArena;
+	TempPushMark();
+	
 	RenderState_t* rs = &appData->renderState;
 	v2i screenSize = PlatformInfo->screenSize;
 	r32 pixelSize = screenSize.x / (r32)appData->colorArrayTexture.width;
@@ -1016,8 +1031,120 @@ AppUpdate_DEFINITION(App_Update)
 		rs->DrawCircle(closestPoint, 2, {Color_Blue});
 	}
 	
-	rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Num Vertices: %u", appData->numVertices);
+	// rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Num Vertices: %u", appData->numVertices);
 	// rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Ball Pos: (%d, %d)", appData->metaBallPos.x, appData->metaBallPos.y);
+	
+	// +================================+
+	// |     Test Line Intersection     |
+	// +================================+
+	if (appData->testStartPos.x != mousePos.x || appData->testStartPos.y != mousePos.y)
+	{
+		// v2 lineP1 = NewVec2(200, 100);
+		// v2 lineP2 = NewVec2(100, 200);
+		
+		// v2 intersection;
+		// u8 result = LineVsLine(lineP1, lineP2, appData->testStartPos, mousePos, &intersection);
+		
+		// rs->DrawLine(lineP1, lineP2, {Color_Cyan});
+		rs->DrawLine(appData->testStartPos, mousePos, {Color_Yellow});
+		
+		// if (result > 0)
+		// {
+		// 	if (result == 1)
+		// 	{
+		// 		rs->DrawCircle(intersection, 2.0f, {Color_Red});
+		// 	}
+		// 	//else infinite intersections
+		// }
+		
+		if (true && appData->vertices != nullptr)
+		{
+			v2 l2p1 = appData->testStartPos;
+			v2 l2p2 = mousePos;
+			v2 textPos = NewVec2(10, 10 + appData->testFont.maxExtendUp);
+			
+			TempPushMark();
+			
+			TempList_t intersectTimesList, intersectSidesList;
+			TempListInit(&intersectTimesList, sizeof(r32));
+			TempListInit(&intersectSidesList, sizeof(u32));
+			
+			for (u32 sIndex = 0; sIndex < appData->numVertices; sIndex++)
+			{
+				v2 vert1 = appData->vertices[(sIndex+0) % appData->numVertices];
+				v2 vert2 = appData->vertices[(sIndex+1) % appData->numVertices];
+				
+				v2 newIntersect = Vec2_Zero;
+				r32 newIntersectTime = 0;
+				if (LineVsLine(vert1, vert2, l2p1, l2p2, &newIntersect, &newIntersectTime) == 1)
+				{
+					u32 itemIndex = 0;
+					TempListItem_t* currentItem = intersectTimesList.firstItem;
+					while (currentItem != nullptr && itemIndex < intersectTimesList.numItems)
+					{
+						r32* valuePntr = (r32*)&currentItem->itemStart;
+						if (*valuePntr > newIntersectTime) { break; }
+						itemIndex++;
+						currentItem = currentItem->nextItem;
+					}
+					TempListAddAt(&intersectTimesList, r32, itemIndex, &newIntersectTime);
+					TempListAddAt(&intersectSidesList, u32, itemIndex, &sIndex);
+					
+					// rs->DrawLine(vert1, vert2, {Color_Red});
+					
+				}
+			}
+			
+			u32 numIntersections = intersectTimesList.numItems;
+			r32* intersectTimes = TempListToArray(&intersectTimesList, r32, &appData->mainHeap);
+			u32* intersectSides = TempListToArray(&intersectSidesList, u32, &appData->mainHeap);
+			
+			TempPopMark();
+			
+			if (numIntersections != 0)
+			{
+				v2 lineDir = Vec2Normalize(l2p2 - l2p1);
+				bool insideBunker = false;
+				v2 enterPos = Vec2_Zero;
+				for (u32 iIndex = 0; iIndex < numIntersections; iIndex++)
+				{
+					r32 intTime = intersectTimes[iIndex];
+					u32 intSide = intersectSides[iIndex];
+					v2 intersectPos = l2p1 + (l2p2-l2p1) * intTime;
+					v2 vert1 = appData->vertices[intSide];
+					v2 vert2 = appData->vertices[(intSide+1) % appData->numVertices];
+					v2 sideDir = Vec2Normalize(vert2 - vert1);
+					v2 sideTangent = NewVec2(-sideDir.y, sideDir.x);
+					r32 tangentDot = Vec2Dot(lineDir, sideTangent);
+					
+					if (tangentDot > 0 && insideBunker == false)
+					{
+						enterPos = intersectPos;
+						insideBunker = true;
+						rs->DrawCircle(intersectPos, 2, {Color_Green});
+						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Entering Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+					}
+					else if (tangentDot < 0 && insideBunker == true)
+					{
+						rs->DrawLine(enterPos, intersectPos, {Color_Black});
+						insideBunker = false;
+						rs->DrawCircle(intersectPos, 2, {Color_Red});
+						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Exiting Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+					}
+					else
+					{
+						rs->DrawCircle(intersectPos, 5, {Color_Purple});
+						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Crossing Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+					}
+					
+					// rs->DrawLine(vert1, vert2, {Color_Red});
+				}
+			}
+			
+			if (intersectTimes != nullptr) { ArenaPop(&appData->mainHeap, intersectTimes); }
+			if (intersectSides != nullptr) { ArenaPop(&appData->mainHeap, intersectSides); }
+		}
+	}
 	
 	// +================================+
 	// |       Draw Controls Help       |
@@ -1045,6 +1172,8 @@ AppUpdate_DEFINITION(App_Update)
 		rs->DrawString(infoStr, infoPos + Vec2_One, NewColor(0, 0, 0, 200));
 		rs->DrawString(infoStr, infoPos, {Color_White});
 	}
+	
+	TempPopMark();
 }
 
 // +----------------------------------------------------------------+
