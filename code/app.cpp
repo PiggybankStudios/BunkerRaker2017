@@ -24,6 +24,8 @@ Description:
 #define MAX_DIVISION_BACKSTEP 5
 #define MAX_VERTICES          200
 
+#define RAKE_WIDTH            30
+
 #include <stdarg.h>
 #include "platformInterface.h"
 #include "app_version.h"
@@ -141,7 +143,7 @@ void FillColorArray(AppData_t* appData, v2i mousePos)
 			
 			if (value >= 1.0f)
 			{
-				pixelColor = { Color_SandyBrown };
+				pixelColor = NewColor(216, 168, 93, 255);
 			}
 			
 			SetColorInArray(appData->colorArray, appData->colorArraySize, xPos, yPos, pixelColor);
@@ -735,10 +737,399 @@ void GenerateBevelOverlay(AppData_t* appData, r32 pixelSize, r32 bevelSize, r32 
 	appData->bevelOverlayTexture = CreateTexture((u8*)appData->bevelOverlayColors, appData->colorArraySize.x, appData->colorArraySize.y, true, false);
 }
 
-u32 GetBunkerSlices(AppData_t* appData, v2 sliceVec, Span_t* spanBufferOut = nullptr)
+bool SliceContains(const Slice_t* slice, r32 value, Span_t** spanPntrOut = nullptr)
 {
+	Assert(slice != nullptr);
 	
-	return 0;
+	for (u32 sIndex = 0; sIndex < slice->numSpans; sIndex++)
+	{
+		Span_t* spanPntr = &slice->spans[sIndex];
+		if (spanPntr->start <= value && spanPntr->end >= value)
+		{
+			return true;
+		}
+	}
+	
+	return false;
+}
+
+Slice_t CombineSlices(const Slice_t* slice1, const Slice_t* slice2)
+{
+	Assert(slice1 != nullptr);
+	Assert(slice2 != nullptr);
+	
+	Slice_t result = {};
+	
+	#if DEBUG
+	//Ensure that the spans are in order
+	{
+		Span_t* lastSpan = nullptr;
+		for (u32 sIndex = 0; sIndex < slice1->numSpans; sIndex++)
+		{
+			Span_t* span = &slice1->spans[sIndex];
+			if (span->start > span->end)
+			{
+				Assert(false); //Span starts at a higher value than it ends
+			}
+			if (lastSpan != nullptr && lastSpan->end > span->start)
+			{
+				Assert(false); //Span is out of order, ends before the last span ends
+			}
+			lastSpan = span;
+		}
+		lastSpan = nullptr;
+		for (u32 sIndex = 0; sIndex < slice2->numSpans; sIndex++)
+		{
+			Span_t* span = &slice2->spans[sIndex];
+			if (span->start > span->end)
+			{
+				Assert(false); //Span starts at a higher value than it ends
+			}
+			if (lastSpan != nullptr && lastSpan->end > span->start)
+			{
+				Assert(false); //Span is out of order, ends before the last span ends
+			}
+			lastSpan = span;
+		}
+	}
+	#endif
+	
+	TempPushMark();
+	
+	TempList_t newSpansList;
+	TempListInit(&newSpansList, sizeof(Span_t));
+	
+	bool inSlice1 = false, inSlice2 = false;
+	u32 index1 = 0, index2 = 0;
+	bool spanStarted = false;
+	r32 spanStart = 0;
+	while (index1 < slice1->numSpans*2 || index2 < slice2->numSpans*2)
+	{
+		Assert(index1 <= slice1->numSpans*2);
+		Assert(index2 <= slice2->numSpans*2);
+		
+		r32* next1 = (index1%2 == 0) ? &slice1->spans[index1/2].start : &slice1->spans[index1/2].end;
+		r32* next2 = (index2%2 == 0) ? &slice2->spans[index2/2].start : &slice2->spans[index2/2].end;
+		
+		if (index1 < slice1->numSpans*2 && (index2 >= slice2->numSpans*2 || *next1 <= *next2))
+		{
+			inSlice1 = (index1%2 == 0);
+			
+			if (inSlice1 && inSlice2)
+			{
+				spanStarted = true;
+				spanStart = *next1;
+			}
+			else if (spanStarted)
+			{
+				spanStarted = false;
+				Span_t newSpan = {};
+				newSpan.start = spanStart;
+				newSpan.end = *next1;
+				TempListAdd(&newSpansList, Span_t, &newSpan);
+			}
+			
+			index1++;
+		}
+		else
+		{
+			inSlice2 = (index2%2 == 0);
+			
+			if (inSlice1 && inSlice2)
+			{
+				spanStarted = true;
+				spanStart = *next2;
+			}
+			else if (spanStarted)
+			{
+				spanStarted = false;
+				Span_t newSpan = {};
+				newSpan.start = spanStart;
+				newSpan.end = *next2;
+				TempListAdd(&newSpansList, Span_t, &newSpan);
+			}
+			
+			index2++;
+		}
+	}
+	
+	result.numSpans = newSpansList.numItems;
+	
+	if (result.numSpans > 0)
+	{
+		Span_t* spansTemp = TempListToArray(&newSpansList, Span_t, &GL_AppData->mainHeap);
+		
+		TempPopMark();
+		
+		result.spans = TempArray(Span_t, result.numSpans);
+		memcpy(result.spans, spansTemp, sizeof(Span_t) * result.numSpans);
+		ArenaPop(&GL_AppData->mainHeap, spansTemp);
+		
+		return result;
+	}
+	else
+	{
+		TempPopMark();
+		return result;
+	}
+	
+}
+
+u32 GetSpans(AppData_t* appData, v2 sliceStart, v2 sliceEnd, Span_t** spansOut, RenderState_t* rs = nullptr)
+{
+	u32 numIntersections = 0;
+	r32* intersectTimes = nullptr;
+	u32* intersectSides = nullptr;
+	
+	TempPushMark();
+	
+	//Find intersection points
+	{
+		TempList_t intersectTimesList, intersectSidesList;
+		TempListInit(&intersectTimesList, sizeof(r32));
+		TempListInit(&intersectSidesList, sizeof(u32));
+		
+		for (u32 sIndex = 0; sIndex < appData->numVertices; sIndex++)
+		{
+			v2 vert1 = appData->vertices[(sIndex+0) % appData->numVertices];
+			v2 vert2 = appData->vertices[(sIndex+1) % appData->numVertices];
+			
+			v2 newIntersect = Vec2_Zero;
+			r32 newIntersectTime = 0;
+			if (LineVsLine(vert1, vert2, sliceStart, sliceEnd, &newIntersect, &newIntersectTime) == 1)
+			{
+				u32 itemIndex = 0;
+				TempListItem_t* currentItem = intersectTimesList.firstItem;
+				while (currentItem != nullptr && itemIndex < intersectTimesList.numItems)
+				{
+					r32* valuePntr = (r32*)&currentItem->itemStart;
+					if (*valuePntr > newIntersectTime) { break; }
+					itemIndex++;
+					currentItem = currentItem->nextItem;
+				}
+				TempListAddAt(&intersectTimesList, r32, itemIndex, &newIntersectTime);
+				TempListAddAt(&intersectSidesList, u32, itemIndex, &sIndex);
+				
+				// rs->DrawLine(vert1, vert2, {Color_Red});
+				
+			}
+		}
+		
+		//Copy info into mainHeap temporarily
+		numIntersections = intersectTimesList.numItems;
+		r32* intersectTimesTemp = TempListToArray(&intersectTimesList, r32, &appData->mainHeap);
+		u32* intersectSidesTemp = TempListToArray(&intersectSidesList, u32, &appData->mainHeap);
+		
+		TempPopMark(); //Reset back to original mark pos
+		TempPushMark();
+		
+		if (numIntersections > 0)
+		{
+			//Move it back onto the TempArena and pop from mainHeap
+			intersectTimes = TempArray(r32, numIntersections);
+			memcpy(intersectTimes, intersectTimesTemp, sizeof(r32) * numIntersections);
+			ArenaPop(&appData->mainHeap, intersectTimesTemp);
+			
+			intersectSides = TempArray(u32, numIntersections);
+			memcpy(intersectSides, intersectSidesTemp, sizeof(u32) * numIntersections);
+			ArenaPop(&appData->mainHeap, intersectSidesTemp);
+		}
+		else
+		{
+			Assert(intersectTimesTemp == nullptr);
+			Assert(intersectSidesTemp == nullptr);
+			*spansOut = nullptr;
+			TempPopMark();
+			return 0;
+		}
+	}
+	
+	//Turn the intersections into spans
+	{	
+		TempList_t spansList;
+		TempListInit(&spansList, sizeof(Span_t));
+		
+		v2 textPos = NewVec2(10, 10 + appData->testFont.maxExtendUp);
+		v2 lineDir = Vec2Normalize(sliceEnd - sliceStart);
+		bool insideBunker = false;
+		v2 enterPos = Vec2_Zero;
+		r32 enterTime = 0;
+		for (u32 iIndex = 0; iIndex < numIntersections; iIndex++)
+		{
+			r32 intTime = intersectTimes[iIndex];
+			u32 intSide = intersectSides[iIndex];
+			v2 intersectPos = sliceStart + (sliceEnd-sliceStart) * intTime;
+			v2 vert1 = appData->vertices[intSide];
+			v2 vert2 = appData->vertices[(intSide+1) % appData->numVertices];
+			v2 sideDir = Vec2Normalize(vert2 - vert1);
+			v2 sideTangent = NewVec2(-sideDir.y, sideDir.x);
+			r32 tangentDot = Vec2Dot(lineDir, sideTangent);
+			
+			if (tangentDot > 0 && insideBunker == false)
+			{
+				enterPos = intersectPos;
+				enterTime = intTime;
+				insideBunker = true;
+				
+				if (rs != nullptr)
+				{
+					rs->DrawCircle(intersectPos, 2, {Color_Green});
+					// rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Entering Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+				}
+			}
+			else if (tangentDot < 0 && insideBunker == true)
+			{
+				insideBunker = false;
+				
+				Span_t newSpan = {};
+				newSpan.start = enterTime;
+				newSpan.end = intTime;
+				if (newSpan.start > newSpan.end) //Make sure that start is less than end
+				{
+					newSpan.start = intTime;
+					newSpan.end = enterTime;
+				}
+				TempListAdd(&spansList, Span_t, &newSpan);
+				
+				if (rs != nullptr)
+				{
+					rs->DrawLine(enterPos, intersectPos, {Color_White});
+					rs->DrawCircle(intersectPos, 2, {Color_Red});
+					// rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Exiting Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+				}
+			}
+			else
+			{
+				if (rs != nullptr)
+				{
+					rs->DrawCircle(intersectPos, 5, {Color_Purple});
+					// rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Crossing Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
+				}
+			}
+			
+			// if (rs != nullptr) { rs->DrawLine(vert1, vert2, {Color_Red}); }
+		}
+		
+		//Move into mainHeap temporarily
+		u32 numSpans = spansList.numItems;
+		Span_t* spansTemp = TempListToArray(&spansList, Span_t, &appData->mainHeap);
+		
+		TempPopMark(); //Pop the intersections arrays and spansList
+		
+		if (numSpans > 0)
+		{
+			//Copy back into temp memory so it can be returned to caller on the TempArena
+			*spansOut = TempArray(Span_t, numSpans);
+			memcpy(*spansOut, spansTemp, sizeof(Span_t) * numSpans);
+			ArenaPop(&appData->mainHeap, spansTemp);
+			
+			return numSpans;
+		}
+		else
+		{
+			Assert(spansTemp == nullptr);
+			*spansOut = nullptr;
+			return 0;
+		}
+		
+	}
+}
+
+u32 GetBunkerSlices(AppData_t* appData, v2 sliceVec, r32 rakeWidth, Slice_t** slicesOut, v2* firstSliceStart, v2* firstSliceEnd, RenderState_t* rs = nullptr)
+{
+	Assert(slicesOut != nullptr);
+	
+	v2 sliceTangent = NewVec2(-sliceVec.y, sliceVec.x);
+	
+	Span_t extent = {};
+	Span_t extentTangent = {};
+	for (u32 vIndex = 0; vIndex < appData->numVertices; vIndex++)
+	{
+		v2 vert = appData->vertices[vIndex];
+		r32 dot = Vec2Dot(vert, sliceVec);
+		r32 dotTangent = Vec2Dot(vert, sliceTangent);
+		
+		if (vIndex == 0 || dot < extent.start) { extent.start = dot; }
+		if (vIndex == 0 || dot > extent.end)   { extent.end = dot; }
+		if (vIndex == 0 || dotTangent < extentTangent.start) { extentTangent.start = dotTangent; }
+		if (vIndex == 0 || dotTangent > extentTangent.end) { extentTangent.end = dotTangent; }
+	}
+	
+	extent.start -= 10;
+	extent.end += 10;
+	
+	v2 vert1 = (extent.start * sliceVec) + (extentTangent.start * sliceTangent);
+	v2 vert2 = (extent.end * sliceVec)   + (extentTangent.start * sliceTangent);
+	v2 vert3 = (extent.end * sliceVec)   + (extentTangent.end * sliceTangent);
+	v2 vert4 = (extent.start * sliceVec) + (extentTangent.end * sliceTangent);
+	
+	if (rs != nullptr && appData->drawDebug)
+	{
+		// rs->DrawLine(vert1, vert2, {Color_Red});
+		rs->DrawLine(vert2, vert3, {Color_Red});
+		// rs->DrawLine(vert3, vert4, {Color_Red});
+		rs->DrawLine(vert4, vert1, {Color_Red});
+	}
+	
+	TempPushMark();
+	
+	*firstSliceStart = vert1 + sliceTangent * rakeWidth/2;
+	*firstSliceEnd   = vert2 + sliceTangent * rakeWidth/2;
+	
+	TempList_t slicesList;
+	TempListInit(&slicesList, sizeof(Slice_t));
+	for (r32 addY = rakeWidth/2; addY < extentTangent.end - extentTangent.start; addY += rakeWidth)
+	{
+		v2 sliceStart = vert1 + sliceTangent * addY;
+		v2 sliceEnd = vert2 + sliceTangent * addY;
+		
+		Slice_t newSlice = {};
+		newSlice.numSpans = GetSpans(appData, sliceStart, sliceEnd, &newSlice.spans, appData->drawDebug ? rs : nullptr);
+		TempListAdd(&slicesList, Slice_t, &newSlice);
+		
+		if (rs != nullptr && appData->drawDebug)
+		{
+			rs->DrawLine(sliceStart, sliceEnd, {Color_Red});
+		}
+	}
+	
+	u32 numSlices = slicesList.numItems;
+	if (numSlices > 0)
+	{
+		Slice_t* slicesTemp = TempListToArray(&slicesList, Slice_t, &appData->mainHeap);
+		//Move each span array into mainHeap
+		for (u32 sIndex = 0; sIndex < numSlices; sIndex++)
+		{
+			Span_t* spansPntr = slicesTemp[sIndex].spans;
+			Span_t* spansTemp = PushArray(&appData->mainHeap, Span_t, slicesTemp[sIndex].numSpans);
+			memcpy(spansTemp, spansPntr, sizeof(Span_t) * slicesTemp[sIndex].numSpans);
+			slicesTemp[sIndex].spans  = spansTemp;
+		}
+		
+		TempPopMark();
+		
+		*slicesOut = TempArray(Slice_t, numSlices);
+		//Move each span array back onto TempArena and pop off mainHeap
+		for (u32 sIndex = 0; sIndex < numSlices; sIndex++)
+		{
+			Span_t* spansPntr = slicesTemp[sIndex].spans;
+			Span_t* spansTemp = TempArray(Span_t, slicesTemp[sIndex].numSpans);
+			memcpy(spansTemp, spansPntr, sizeof(Span_t) * slicesTemp[sIndex].numSpans);
+			slicesTemp[sIndex].spans  = spansTemp;
+			ArenaPop(&appData->mainHeap, spansPntr);
+		}
+		memcpy(*slicesOut, slicesTemp, sizeof(Slice_t) * numSlices);
+		
+		ArenaPop(&appData->mainHeap, slicesTemp);
+		
+		return numSlices;
+	}
+	else
+	{
+		TempPopMark();
+		return 0;
+	}
+	
 }
 
 // +------------------------------------------------------------------+
@@ -929,6 +1320,76 @@ AppUpdate_DEFINITION(App_Update)
 	rs->BindTexture(&appData->bevelOverlayTexture);
 	rs->DrawTexturedRec(NewRectangle(0, 0, (r32)screenSize.x, (r32)screenSize.y), {Color_White});
 	
+	// +================================+
+	// |     Test Slice Calculation     |
+	// +================================+
+	if (appData->testStartPos.x != mousePos.x || appData->testStartPos.y != mousePos.y)
+	{
+		rs->DrawLine(appData->testStartPos, mousePos, {Color_Yellow});
+		
+		if (true && appData->vertices != nullptr)
+		{
+			TempPushMark();
+			
+			Span_t* spans = nullptr;
+			u32 numSpans = GetSpans(appData, appData->testStartPos, mousePos, &spans, rs);
+			
+			if (numSpans > 0)
+			{
+				// DEBUG_PrintLine("%u Spans", numSpans);
+			}
+			
+			v2 rakeDirection = Vec2Normalize(mousePos - appData->testStartPos);
+			v2 firstSliceStart, firstSliceEnd;
+			Slice_t* slices;
+			u32 numSlices = GetBunkerSlices(appData, rakeDirection, RAKE_WIDTH, &slices, &firstSliceStart, &firstSliceEnd, rs);
+			
+			// v2 textPos d= NewVec2(10, 10 + appData->testFont.maxExtendUp);
+			v2 rakeDirTangent = NewVec2(-rakeDirection.y, rakeDirection.x);
+			for (u32 sIndex = 1; sIndex < numSlices; sIndex++)
+			{
+				Slice_t* lastSlice = &slices[sIndex-1];
+				Slice_t* slice = &slices[sIndex];
+				
+				v2 leftLineStart   = firstSliceStart + rakeDirTangent * (RAKE_WIDTH * (r32)(sIndex-1));
+				v2 leftLineEnd     = firstSliceEnd   + rakeDirTangent * (RAKE_WIDTH * (r32)(sIndex-1));
+				v2 rightLineStart  = firstSliceStart + rakeDirTangent * (RAKE_WIDTH * (r32)sIndex);
+				v2 rightLineEnd    = firstSliceEnd   + rakeDirTangent * (RAKE_WIDTH * (r32)sIndex);
+				v2 centerLineStart = firstSliceStart + rakeDirTangent * (RAKE_WIDTH * (r32)(sIndex-1) + RAKE_WIDTH/2.0f);
+				v2 centerLineEnd   = firstSliceEnd   + rakeDirTangent * (RAKE_WIDTH * (r32)(sIndex-1) + RAKE_WIDTH/2.0f);
+				
+				// rs->DrawLine(leftLineStart, leftLineEnd, {Color_Red});
+				// rs->DrawLine(rightLineStart, rightLineEnd, {Color_Blue});
+				
+				Slice_t combined = CombineSlices(lastSlice, slice);
+				// rs->PrintString(textPos, {Color_White}, 1.0f, "Slice[%u] %u Spans:", sIndex, combined.numSpans); textPos.y += appData->testFont.lineHeight;
+				for (u32 spanIndex = 0; spanIndex < combined.numSpans; spanIndex++)
+				{
+					Span_t* spanPntr = &combined.spans[spanIndex];
+					
+					// rs->PrintString(textPos, {Color_White}, 1.0f, "\tSpan[%u] %.2f - %.2f", spanIndex, spanPntr->start, spanPntr->end); textPos.y += appData->testFont.lineHeight;
+					
+					v2 vert1 = leftLineStart  + (leftLineEnd  - leftLineStart)  * spanPntr->start;
+					v2 vert2 = leftLineStart  + (leftLineEnd  - leftLineStart)  * spanPntr->end;
+					v2 vert3 = rightLineStart + (rightLineEnd - rightLineStart) * spanPntr->end;
+					v2 vert4 = rightLineStart + (rightLineEnd - rightLineStart) * spanPntr->start;
+					
+					// rs->DrawLine(vert1, vert2, {Color_Red});
+					// rs->DrawLine(vert2, vert3, {Color_Red});
+					// rs->DrawLine(vert3, vert4, {Color_Red});
+					// rs->DrawLine(vert4, vert1, {Color_Red});
+					
+					v2 rakeVert1 = centerLineStart + (centerLineEnd - centerLineStart) * spanPntr->start;
+					v2 rakeVert2 = centerLineStart + (centerLineEnd - centerLineStart) * spanPntr->end;
+					Color_t rakeColor = (sIndex%2 == 0) ? NewColor(194, 145, 70, 255) : NewColor(238, 193, 122, 255);
+					rs->DrawLine(rakeVert1, rakeVert2, rakeColor, RAKE_WIDTH);
+				}
+			}
+			
+			TempPopMark();
+		}
+	}
+	
 	// +==================================+
 	// |      Draw Meta Balls Debug       |
 	// +==================================+
@@ -996,7 +1457,7 @@ AppUpdate_DEFINITION(App_Update)
 	// +==================================+
 	// |          Draw Vertices           |
 	// +==================================+
-	if (true && appData->vertices != nullptr)
+	if (appData->drawDebug && appData->vertices != nullptr)
 	{
 		for (u32 vIndex = 0; vIndex < appData->numVertices; vIndex++)
 		{
@@ -1035,118 +1496,6 @@ AppUpdate_DEFINITION(App_Update)
 	// rs->PrintString(NewVec2(0, appData->testFont.maxExtendUp), {Color_White}, 1.0f, "Ball Pos: (%d, %d)", appData->metaBallPos.x, appData->metaBallPos.y);
 	
 	// +================================+
-	// |     Test Line Intersection     |
-	// +================================+
-	if (appData->testStartPos.x != mousePos.x || appData->testStartPos.y != mousePos.y)
-	{
-		// v2 lineP1 = NewVec2(200, 100);
-		// v2 lineP2 = NewVec2(100, 200);
-		
-		// v2 intersection;
-		// u8 result = LineVsLine(lineP1, lineP2, appData->testStartPos, mousePos, &intersection);
-		
-		// rs->DrawLine(lineP1, lineP2, {Color_Cyan});
-		rs->DrawLine(appData->testStartPos, mousePos, {Color_Yellow});
-		
-		// if (result > 0)
-		// {
-		// 	if (result == 1)
-		// 	{
-		// 		rs->DrawCircle(intersection, 2.0f, {Color_Red});
-		// 	}
-		// 	//else infinite intersections
-		// }
-		
-		if (true && appData->vertices != nullptr)
-		{
-			v2 l2p1 = appData->testStartPos;
-			v2 l2p2 = mousePos;
-			v2 textPos = NewVec2(10, 10 + appData->testFont.maxExtendUp);
-			
-			TempPushMark();
-			
-			TempList_t intersectTimesList, intersectSidesList;
-			TempListInit(&intersectTimesList, sizeof(r32));
-			TempListInit(&intersectSidesList, sizeof(u32));
-			
-			for (u32 sIndex = 0; sIndex < appData->numVertices; sIndex++)
-			{
-				v2 vert1 = appData->vertices[(sIndex+0) % appData->numVertices];
-				v2 vert2 = appData->vertices[(sIndex+1) % appData->numVertices];
-				
-				v2 newIntersect = Vec2_Zero;
-				r32 newIntersectTime = 0;
-				if (LineVsLine(vert1, vert2, l2p1, l2p2, &newIntersect, &newIntersectTime) == 1)
-				{
-					u32 itemIndex = 0;
-					TempListItem_t* currentItem = intersectTimesList.firstItem;
-					while (currentItem != nullptr && itemIndex < intersectTimesList.numItems)
-					{
-						r32* valuePntr = (r32*)&currentItem->itemStart;
-						if (*valuePntr > newIntersectTime) { break; }
-						itemIndex++;
-						currentItem = currentItem->nextItem;
-					}
-					TempListAddAt(&intersectTimesList, r32, itemIndex, &newIntersectTime);
-					TempListAddAt(&intersectSidesList, u32, itemIndex, &sIndex);
-					
-					// rs->DrawLine(vert1, vert2, {Color_Red});
-					
-				}
-			}
-			
-			u32 numIntersections = intersectTimesList.numItems;
-			r32* intersectTimes = TempListToArray(&intersectTimesList, r32, &appData->mainHeap);
-			u32* intersectSides = TempListToArray(&intersectSidesList, u32, &appData->mainHeap);
-			
-			TempPopMark();
-			
-			if (numIntersections != 0)
-			{
-				v2 lineDir = Vec2Normalize(l2p2 - l2p1);
-				bool insideBunker = false;
-				v2 enterPos = Vec2_Zero;
-				for (u32 iIndex = 0; iIndex < numIntersections; iIndex++)
-				{
-					r32 intTime = intersectTimes[iIndex];
-					u32 intSide = intersectSides[iIndex];
-					v2 intersectPos = l2p1 + (l2p2-l2p1) * intTime;
-					v2 vert1 = appData->vertices[intSide];
-					v2 vert2 = appData->vertices[(intSide+1) % appData->numVertices];
-					v2 sideDir = Vec2Normalize(vert2 - vert1);
-					v2 sideTangent = NewVec2(-sideDir.y, sideDir.x);
-					r32 tangentDot = Vec2Dot(lineDir, sideTangent);
-					
-					if (tangentDot > 0 && insideBunker == false)
-					{
-						enterPos = intersectPos;
-						insideBunker = true;
-						rs->DrawCircle(intersectPos, 2, {Color_Green});
-						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Entering Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
-					}
-					else if (tangentDot < 0 && insideBunker == true)
-					{
-						rs->DrawLine(enterPos, intersectPos, {Color_Black});
-						insideBunker = false;
-						rs->DrawCircle(intersectPos, 2, {Color_Red});
-						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Exiting Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
-					}
-					else
-					{
-						rs->DrawCircle(intersectPos, 5, {Color_Purple});
-						rs->PrintString(textPos, {Color_White}, 1.0f, "Intersect %u: Crossing Side %u", iIndex, intSide); textPos.y += appData->testFont.lineHeight;
-					}
-					
-					// rs->DrawLine(vert1, vert2, {Color_Red});
-				}
-			}
-			
-			if (intersectTimes != nullptr) { ArenaPop(&appData->mainHeap, intersectTimes); }
-			if (intersectSides != nullptr) { ArenaPop(&appData->mainHeap, intersectSides); }
-		}
-	}
-	
-	// +================================+
 	// |       Draw Controls Help       |
 	// +================================+
 	if (ButtonDown(Button_Tab))
@@ -1164,6 +1513,9 @@ AppUpdate_DEFINITION(App_Update)
 		rs->DrawString("B - Generate bunker bevel texture", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
 		rs->DrawString("Arrow Keys - Move meta ball", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
 		rs->DrawString("Scroll Wheel - Scale meta ball", textPos, {Color_White}); textPos.y += appData->testFont.lineHeight;
+		textPos.y += appData->testFont.lineHeight;
+		u32 highWaterMark = ArenaGetHighWaterMark(TempArena);
+		rs->PrintString(textPos, {Color_White}, 1.0f, "TempArena High: %u/%u (%.2f%%)", highWaterMark, TempArena->size, (r32)highWaterMark / (r32)TempArena->size); textPos.y += appData->testFont.lineHeight;
 	}
 	else
 	{

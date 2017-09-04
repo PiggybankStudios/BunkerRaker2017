@@ -118,4 +118,10 @@ typedef union
 	};
 } Span_t;
 
+struct Slice_t
+{
+	u32 numSpans;
+	Span_t* spans;
+};
+
 #endif // _APP_STRUCTS_H
